@@ -1,0 +1,16 @@
+{
+  "pairs": [
+    {
+      "pairKey": "en_el",
+      "sourceLanguage": "en",
+      "targetLanguage": "el",
+      "file": "en_el.json"
+    },
+    {
+      "pairKey": "el_en",
+      "sourceLanguage": "el",
+      "targetLanguage": "en",
+      "file": "el_en.json"
+    }
+  ]
+}
