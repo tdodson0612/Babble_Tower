@@ -77,18 +77,23 @@ class VocabularyNotifier extends StateNotifier<VocabularyState> {
   // ---------------------------------------------------------------------------
   // loadForBlock
   //
-  // Called whenever the reader moves to a new block. Guarantees every word
-  // ends up in state.entries with a non-empty translation.
+  // Called whenever the reader moves to a new block. Guarantees that every
+  // word in [blockWords] ends up in state.entries with a non-empty English
+  // translation, regardless of what is (or isn't) already in Hive.
   //
   // Strategy:
   //   1. Load everything already stored in Hive for this pair.
   //   2. Identify words that need translation:
   //        a. Brand-new words (not in Hive at all), AND
-  //        b. Words in Hive but with an empty translation (stale bad data).
-  //   3. Bulk-lookup those words using el_en (Greek → English).
-  //      Now returns DictionaryEntry objects with gloss + definition + lemma.
-  //   4. For stale entries, patch and persist the fix to Hive.
-  //   5. Emit a block-scoped entries map.
+  //        b. Words in Hive but with an empty translation (stale bad data
+  //           written before the dictionary-direction bug was fixed).
+  //   3. Bulk-translate those words using the reading-direction dictionary
+  //      (el_en — Greek → English). Never use pairKey (en_el) for lookups;
+  //      that key is only the Hive storage namespace.
+  //   4. For stale entries, patch translation in-memory AND persist the fix
+  //      to Hive so future sessions don't repeat the lookup.
+  //   5. Emit a state whose entries map contains ONLY the current block's
+  //      words (not the entire Hive contents), so the UI has a clean slice.
   // ---------------------------------------------------------------------------
   Future<void> loadForBlock(List<String> blockWords) async {
     if (blockWords.isEmpty) {
@@ -101,65 +106,70 @@ class VocabularyNotifier extends StateNotifier<VocabularyState> {
     try {
       final pairKey = _pairKey;
 
-      // Step 1 — load all stored entries.
+      // Step 1 — load all stored entries, keyed by word.
       final allStored = await _service.getAll(pairKey);
-      final storedMap = <String, WordEntry>{
-        for (final e in allStored) e.word: e
-      };
+      final storedMap = <String, WordEntry>{for (final e in allStored) e.word: e};
 
       // Step 2 — find words needing translation.
       final needsTranslation = blockWords.where((w) {
         final stored = storedMap[w];
+        // Brand-new word, or stale entry with blank translation.
         return stored == null || stored.translation.isEmpty;
       }).toList();
 
-      // Step 3 — bulk-lookup using Greek → English direction.
+      // Step 3 — bulk translate using Greek → English direction.
       if (needsTranslation.isNotEmpty) {
-        final dictEntries = await _dictionary.lookupAll(
+        final entries = await _dictionary.lookupAll(
           AppLanguage.readingDictionaryKey, // 'el_en' — never pairKey here
           needsTranslation,
         );
 
         for (final word in needsTranslation) {
-          final dictEntry = dictEntries[word];
-          final gloss      = dictEntry?.gloss ?? '';
-          final definition = dictEntry?.definition ?? '';
-          final lemma      = dictEntry?.lemma ?? '';
-          final existing   = storedMap[word];
+          final dictEntry = entries[word];
+
+          // IMPORTANT: `gloss` is the translation shown in the UI. For flat
+          // JSON dictionary entries, `definition` is always '' (empty
+          // string, not null), so a `definition ?? gloss` fallback chain
+          // NEVER falls through to gloss and silently produces ''. Use
+          // gloss directly. See CRITICAL BUGS #2 in the project handoff doc.
+          final translation = dictEntry?.gloss ?? '';
+          final definition  = dictEntry?.definition ?? '';
+          final lemma       = dictEntry?.lemma ?? '';
+          final existing = storedMap[word];
 
           if (existing == null) {
-            // Brand-new: create in-memory entry (Hive write deferred).
             storedMap[word] = WordEntry(
-              word:            word,
+              word: word,
               languagePairKey: pairKey,
-              translation:     gloss,
-              definition:      definition,
-              lemma:           lemma,
-              known:           false,
-              masteryLevel:    0,
-              lastReviewed:    DateTime.now(),
+              translation: translation,
+              definition: definition,
+              lemma: lemma,
+              known: false,
+              masteryLevel: 0,
+              lastReviewed: DateTime.now(),
             );
           } else {
-            // Step 4 — stale entry: patch and persist.
+            // Step 4 — stale entry: patch translation and persist fix.
             final patched = existing.copyWith(
-              translation: gloss,
-              definition:  definition,
-              lemma:       lemma,
+              translation: translation,
+              definition: definition,
+              lemma: lemma,
             );
             storedMap[word] = patched;
-            if (gloss.isNotEmpty) {
+            if (translation.isNotEmpty) {
               await _service.save(patched);
             }
           }
         }
       }
 
-      // Step 5 — block-scoped entries map.
+      // Step 5 — build a block-scoped entries map (only current words).
       final blockEntries = <String, WordEntry>{
         for (final w in blockWords)
           if (storedMap.containsKey(w)) w: storedMap[w]!,
       };
 
+      // Derive known set and mastery from the block slice.
       final knownWords = blockWords
           .where((w) => storedMap[w]?.known == true)
           .toSet();
@@ -168,14 +178,14 @@ class VocabularyNotifier extends StateNotifier<VocabularyState> {
           : knownWords.length / blockWords.length;
 
       state = state.copyWith(
-        entries:      blockEntries,
-        newWords:     blockWords
+        entries: blockEntries,
+        newWords: blockWords
             .where((w) => !(allStored.any((e) => e.word == w)))
             .toList(),
-        knownWords:   knownWords,
+        knownWords: knownWords,
         blockMastery: mastery,
-        isLoading:    false,
-        error:        null,
+        isLoading: false,
+        error: null,
       );
     } catch (e, st) {
       state = state.copyWith(isLoading: false, error: '$e\n$st');
@@ -184,6 +194,9 @@ class VocabularyNotifier extends StateNotifier<VocabularyState> {
 
   // ---------------------------------------------------------------------------
   // markKnown / markUnknown
+  //
+  // Persists to Hive via the service. Preserves any in-memory translation so
+  // it is never lost on the round-trip through the service layer.
   // ---------------------------------------------------------------------------
 
   Future<void> markKnown(String word) async {
@@ -195,50 +208,45 @@ class VocabularyNotifier extends StateNotifier<VocabularyState> {
   }
 
   Future<void> _markWord(String word, {required bool known}) async {
-    final pairKey            = _pairKey;
-    final existing           = state.entries[word];
-    final existingTranslation = existing?.translation ?? '';
-    final existingDefinition  = existing?.definition  ?? '';
-    final existingLemma       = existing?.lemma       ?? '';
+    final pairKey = _pairKey;
+    final existingTranslation = state.entries[word]?.translation ?? '';
 
     final updated = known
         ? await _service.markKnown(pairKey, word)
         : await _service.markUnknown(pairKey, word);
 
-    // Re-apply in-memory fields if the service round-trip lost them.
-    final withFields = updated.copyWith(
-      translation: updated.translation.isEmpty ? existingTranslation : null,
-      definition:  updated.definition.isEmpty  ? existingDefinition  : null,
-      lemma:       updated.lemma.isEmpty       ? existingLemma       : null,
-    );
+    // Re-apply in-memory translation if the service lost it.
+    final withTranslation =
+        existingTranslation.isNotEmpty && updated.translation.isEmpty
+            ? updated.copyWith(translation: existingTranslation)
+            : updated;
 
-    // Persist if translation was missing from Hive.
+    // Persist the translation if the service entry was missing it.
     if (existingTranslation.isNotEmpty && updated.translation.isEmpty) {
-      await _service.save(withFields);
+      await _service.save(withTranslation);
     }
 
     final newEntries = Map<String, WordEntry>.from(state.entries)
-      ..[word] = withFields;
+      ..[word] = withTranslation;
 
     final newKnown = known
         ? {...state.knownWords, word}
         : ({...state.knownWords}..remove(word));
 
-    final blockWords =
-        _ref.read(bibleProvider).currentBlock?.words ?? [];
+    final blockWords = _ref.read(bibleProvider).currentBlock?.words ?? [];
     final mastery = blockWords.isEmpty
         ? 0.0
         : newKnown.length / blockWords.length;
 
     state = state.copyWith(
-      entries:      newEntries,
-      knownWords:   newKnown,
+      entries: newEntries,
+      knownWords: newKnown,
       blockMastery: mastery,
     );
   }
 
   // ---------------------------------------------------------------------------
-  // setTranslation — manual override.
+  // setTranslation — manual override, persists immediately.
   // ---------------------------------------------------------------------------
 
   Future<void> setTranslation(String word, String translation) async {
@@ -246,10 +254,10 @@ class VocabularyNotifier extends StateNotifier<VocabularyState> {
     final existing = state.entries[word];
     final updated = (existing ??
             WordEntry(
-              word:            word,
+              word: word,
               languagePairKey: pairKey,
-              translation:     translation,
-              lastReviewed:    DateTime.now(),
+              translation: translation,
+              lastReviewed: DateTime.now(),
             ))
         .copyWith(translation: translation);
 
@@ -259,6 +267,11 @@ class VocabularyNotifier extends StateNotifier<VocabularyState> {
       ..[word] = updated;
     state = state.copyWith(entries: newEntries);
   }
+
+  // ---------------------------------------------------------------------------
+  // clearForLanguageChange — not currently reachable (fixed language pair)
+  // but kept for safety.
+  // ---------------------------------------------------------------------------
 
   void clearForLanguageChange() {
     _dictionary.clearCache();

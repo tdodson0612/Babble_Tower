@@ -6,7 +6,9 @@ class VerseBlock {
   /// 0-based index of this block within its chapter.
   final int blockIndex;
 
-  /// Up to 5 verses (fewer at chapter end).
+  /// The verse(s) in this block. Currently always exactly one verse per
+  /// block (BibleService.buildBlocks uses blockSize=1) — the verse-lock
+  /// quiz gate in reader_screen.dart operates per individual verse.
   final List<Verse> verses;
 
   /// Normalized, deduplicated word list extracted from this block.
@@ -18,7 +20,8 @@ class VerseBlock {
     required this.words,
   });
 
-  /// Convenience: verse range label, e.g. "1–5".
+  /// Convenience: verse range label, e.g. "1" (or "1–5" if a future
+  /// blockSize change groups multiple verses again).
   String get rangeLabel {
     if (verses.isEmpty) return '';
     final first = verses.first.number;

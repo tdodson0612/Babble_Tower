@@ -1,6 +1,5 @@
 // lib/domain/usecases/track_progress_usecase.dart
 
-import 'package:hive_flutter/hive_flutter.dart';
 import '../../data/models/reading_progress_model.dart';
 import '../../data/services/hive_service.dart';
 import '../../data/services/prefs_service.dart';

@@ -48,24 +48,27 @@ class VocabularyService {
     await box.putAll(map);
   }
 
-  /// Marks a word as known and bumps mastery by 1 (max 3).
+  /// Marks a word as known and bumps mastery by 1 (max 5).
+  /// Clamp raised from 3 → 5 to match isMastered threshold in
+  /// word_entry.dart (masteryLevel >= 5). See project handoff doc,
+  /// Mastery System section.
   Future<WordEntry> markKnown(String pairKey, String word) async {
     final existing = await get(pairKey, word);
     final updated = (existing ?? _blank(pairKey, word)).copyWith(
       known: true,
-      masteryLevel: ((existing?.masteryLevel ?? 0) + 1).clamp(0, 3),
+      masteryLevel: ((existing?.masteryLevel ?? 0) + 1).clamp(0, 5),
       lastReviewed: DateTime.now(),
     );
     await save(updated);
     return updated;
   }
 
-  /// Marks a word as not known and resets mastery to 0.
+  /// Marks a word as not known and decrements mastery by 1 (min 0).
   Future<WordEntry> markUnknown(String pairKey, String word) async {
     final existing = await get(pairKey, word);
     final updated = (existing ?? _blank(pairKey, word)).copyWith(
       known: false,
-      masteryLevel: 0,
+      masteryLevel: ((existing?.masteryLevel ?? 1) - 1).clamp(0, 5),
       lastReviewed: DateTime.now(),
     );
     await save(updated);
@@ -114,8 +117,9 @@ class VocabularyService {
         translation: m['translation'] as String? ?? '',
         known: m['known'] as bool? ?? false,
         masteryLevel: m['masteryLevel'] as int? ?? 0,
-        lastReviewed: DateTime.tryParse(m['lastReviewed'] as String? ?? '') ??
-            DateTime.now(),
+        lastReviewed:
+            DateTime.tryParse(m['lastReviewed'] as String? ?? '') ??
+                DateTime.now(),
       );
 
   WordEntry _blank(String pairKey, String word) => WordEntry(

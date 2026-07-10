@@ -4,8 +4,9 @@ import '../entities/verse.dart';
 import '../entities/verse_block.dart';
 import '../../data/services/bible_service.dart';
 
-/// Loads a full chapter and splits it into 5-verse blocks.
-/// This is the single entry point for all chapter loading logic.
+/// Loads a full chapter and splits it into verse blocks (one verse per
+/// block — see BibleService.buildBlocks, blockSize=1). This is the single
+/// entry point for all chapter loading logic.
 class LoadChapterUseCase {
   final BibleService _bibleService;
 
@@ -85,8 +86,7 @@ class LoadChapterResult {
         languageCode: languageCode,
       );
 
-  factory LoadChapterResult.failure(String message) =>
-      LoadChapterResult._(
+  factory LoadChapterResult.failure(String message) => LoadChapterResult._(
         success: false,
         verses: const [],
         blocks: const [],

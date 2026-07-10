@@ -21,6 +21,20 @@ dependencies:
   path_provider: ^2.1.1
   flutter_tts: ^4.2.5
 
+  # Audio — quiz correct/incorrect sound effects (Phase: sound effects)
+  audioplayers: ^6.0.0
+
+  # Vocabulary CSV export — native share sheet
+  share_plus: ^12.0.2
+
+  # Backup restore — native file picker
+  file_picker: ^10.3.9
+
+  # Streak reminder notifications
+  flutter_local_notifications: ^20.1.0
+  timezone: ^0.10.1
+  flutter_timezone: ^3.0.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -31,3 +45,5 @@ flutter:
   assets:
     - assets/bible/el/
     - assets/dictionaries/
+    - assets/sounds/
+    - assets/morphology/

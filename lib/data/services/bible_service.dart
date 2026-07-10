@@ -2,64 +2,45 @@
 
 import 'dart:convert';
 import 'package:flutter/services.dart';
+import '../../core/constants/supported_languages.dart';
+import '../../core/utils/text_normalizer.dart';
 import '../../domain/entities/verse.dart';
 import '../../domain/entities/verse_block.dart';
-import '../../core/utils/text_normalizer.dart';
 
-/// Loads Bible text from bundled JSON assets.
-///
-/// Expected asset structure:
-///   assets/bible/{languageCode}/{filename}.json
-///
-/// Each JSON file is structured as:
-/// {
-///   "book": "John",
-///   "chapters": {
-///     "1": [{"verse": 1, "text": "..."}, ...]
-///   }
-/// }
 class BibleService {
-  // Each verse is its own learning unit.
+  // ONE verse per block — the core pedagogical unit.
   static const int blockSize = 1;
 
-  /// Maps display book names (as they appear in manifest.json) to their
-  /// asset filenames (no extension). Required because "John" maps to
-  /// the file "ioannis.json" — the Greek transliteration used for the
-  /// Gospel of John, to avoid colliding with the apostle John elsewhere.
-  static const Map<String, String> _filenameOverrides = {
-    'John': 'ioannis',
-  };
+  final Map<String, dynamic> _manifestCache = {};
+  final Map<String, List<Verse>> _verseCache = {};
 
-  /// Converts a book display name to its asset filename.
-  static String _toFilename(String book) {
-    if (_filenameOverrides.containsKey(book)) {
-      return _filenameOverrides[book]!;
-    }
-    return book
-        .toLowerCase()
-        .replaceAll(' ', '_')
-        .replaceAll(RegExp(r'[^\w]'), '');
-  }
+  // ---------------------------------------------------------------------------
+  // Public API (used by bible_provider and load_chapter_usecase)
+  // ---------------------------------------------------------------------------
 
-  /// Returns list of available book names for [languageCode].
+  /// Returns the list of available books for [languageCode] (e.g. 'el').
+  /// Handles both flat-string ["Matthew", ...] and object
+  /// [{"name": "Matthew", "file": "...", "chapters": 28}, ...] manifests.
   Future<List<String>> getAvailableBooks(String languageCode) async {
-    try {
-      final raw = await rootBundle
-          .loadString('assets/bible/$languageCode/manifest.json');
-      final decoded = json.decode(raw) as Map<String, dynamic>;
-      final books = decoded['books'] as List<dynamic>;
-      return books
-          .map((b) => (b as Map<String, dynamic>)['name'] as String)
-          .toList();
-    } catch (e) {
-      return _fallbackBooks;
+    final manifest = await _loadManifest(languageCode);
+    final books = manifest['books'];
+    if (books is List) {
+      return books.map((b) {
+        if (b is String) return b;
+        if (b is Map)    return (b['name'] as String?) ?? '';
+        return '';
+      }).where((s) => s.isNotEmpty).toList();
     }
+    return ['Matthew', 'Mark', 'Luke', 'John'];
   }
 
-  /// Returns number of chapters in [book] for [languageCode].
+  /// Returns the number of chapters in [book] for [languageCode].
   Future<int> getChapterCount(String languageCode, String book) async {
     try {
-      final data = await _loadBook(languageCode, book);
+      final bookFile = _bookFile(book);
+      final raw = await rootBundle
+          .loadString('assets/bible/$languageCode/$bookFile.json');
+      final data = json.decode(raw) as Map<String, dynamic>;
       final chapters = data['chapters'] as Map<String, dynamic>;
       return chapters.length;
     } catch (_) {
@@ -67,62 +48,77 @@ class BibleService {
     }
   }
 
-  /// Loads all verses for [chapter] in [book] for [languageCode].
+  /// Loads and returns all verses for [book] + [chapter] in [languageCode].
   Future<List<Verse>> getVerses(
     String languageCode,
     String book,
     int chapter,
   ) async {
-    final data = await _loadBook(languageCode, book);
-    final chapters = data['chapters'] as Map<String, dynamic>;
-    final chapterData = chapters['$chapter'];
-    if (chapterData == null) return [];
+    final key = '$languageCode-$book-$chapter';
+    if (_verseCache.containsKey(key)) return _verseCache[key]!;
 
-    final verseList = chapterData as List<dynamic>;
-    return verseList
-        .map((v) {
-          final entry = v as Map<String, dynamic>;
-          return Verse(
-            number: entry['verse'] as int,
-            text:   entry['text'] as String,
-          );
-        })
-        .toList()
-      ..sort((a, b) => a.number.compareTo(b.number));
+    final bookFile = _bookFile(book);
+    final raw = await rootBundle
+        .loadString('assets/bible/$languageCode/$bookFile.json');
+    final data = json.decode(raw) as Map<String, dynamic>;
+    final chapters = data['chapters'] as Map<String, dynamic>;
+    final versesRaw = chapters['$chapter'] as List<dynamic>? ?? [];
+
+    final verses = versesRaw.map((v) {
+      final map = v as Map<String, dynamic>;
+      return Verse(
+        number: map['verse'] as int,
+        text:   map['text']  as String,
+      );
+    }).toList();
+
+    _verseCache[key] = verses;
+    return verses;
   }
 
-  /// Splits [verses] into blocks of [blockSize] (= 1 verse each).
+  /// Splits [verses] into blocks of [blockSize] (1 verse each).
   List<VerseBlock> buildBlocks(List<Verse> verses) {
     final blocks = <VerseBlock>[];
     for (var i = 0; i < verses.length; i += blockSize) {
       final end   = (i + blockSize).clamp(0, verses.length);
-      final chunk = verses.sublist(i, end);
-      final combinedText = chunk.map((v) => v.text).join(' ');
+      final slice = verses.sublist(i, end);
+      final combinedText = slice.map((v) => v.text).join(' ');
+      final words = TextNormalizer.extractWords(combinedText);
       blocks.add(VerseBlock(
-        blockIndex: blocks.length,
-        verses:     chunk,
-        words:      TextNormalizer.extractWords(combinedText),
+        blockIndex: i ~/ blockSize,
+        verses:     slice,
+        words:      words,
       ));
     }
     return blocks;
   }
 
   // ---------------------------------------------------------------------------
-  // Private helpers
+  // Internal
   // ---------------------------------------------------------------------------
 
-  Future<Map<String, dynamic>> _loadBook(
-      String languageCode, String book) async {
-    final filename  = _toFilename(book);
-    final assetPath = 'assets/bible/$languageCode/$filename.json';
-    final raw       = await rootBundle.loadString(assetPath);
-    return json.decode(raw) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> _loadManifest(String languageCode) async {
+    if (_manifestCache.containsKey(languageCode)) {
+      return _manifestCache[languageCode]!;
+    }
+    try {
+      final raw = await rootBundle
+          .loadString('assets/bible/$languageCode/manifest.json');
+      final data = json.decode(raw) as Map<String, dynamic>;
+      _manifestCache[languageCode] = data;
+      return data;
+    } catch (_) {
+      return {};
+    }
   }
 
-  static const List<String> _fallbackBooks = [
-    'Matthew',
-    'Mark',
-    'Luke',
-    'John',
-  ];
+  static String _bookFile(String book) {
+    switch (book.toLowerCase()) {
+      case 'matthew': return 'matthew';
+      case 'mark':    return 'mark';
+      case 'luke':    return 'luke';
+      case 'john':    return 'ioannis';
+      default:        return book.toLowerCase();
+    }
+  }
 }

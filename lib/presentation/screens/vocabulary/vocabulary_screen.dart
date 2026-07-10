@@ -3,7 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/export_service.dart';
 import '../../../domain/entities/word_entry.dart';
+import '../../../domain/usecases/export_vocabulary_usecase.dart';
 import '../../providers/vocabulary_provider.dart';
 import '../../providers/settings_provider.dart';
 
@@ -17,6 +19,7 @@ class VocabularyScreen extends ConsumerStatefulWidget {
 class _VocabularyScreenState extends ConsumerState<VocabularyScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabs;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -28,6 +31,52 @@ class _VocabularyScreenState extends ConsumerState<VocabularyScreen>
   void dispose() {
     _tabs.dispose();
     super.dispose();
+  }
+
+  // ── Export ────────────────────────────────────────────────────────────
+  // "Future ideas" item from the handoff doc's to-do list. Exports every
+  // word currently in the vocabulary provider (both Learning and Known —
+  // deliberately not scoped to whichever tab is open, since "export my
+  // vocabulary" reads as the whole thing, not the current view).
+
+  /// [buttonContext] is the export button's OWN context (see the
+  /// Builder wrapping it below) — needed to compute
+  /// sharePositionOrigin, the on-screen rectangle share_plus anchors
+  /// its popover/share-sheet to. Required on iPad, and as of iOS 26
+  /// required on iPhone too (share_plus throws otherwise) — see
+  /// ExportService.exportAndShare's doc. The Scaffold's own context
+  /// (from `build` below) isn't scoped to the button itself, so it
+  /// can't produce the button's actual RenderBox — that's why this
+  /// needs its own Builder rather than reusing the outer context.
+  Future<void> _exportCsv(BuildContext buttonContext) async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+
+    try {
+      final allEntries =
+          ref.read(vocabularyProvider).entries.values.toList();
+      final csv = const ExportVocabularyUseCase().buildCsv(allEntries);
+      final timestamp = DateTime.now().toIso8601String().split('T').first;
+
+      final box = buttonContext.findRenderObject() as RenderBox?;
+      final origin =
+          box != null ? (box.localToGlobal(Offset.zero) & box.size) : null;
+
+      await const ExportService().exportAndShare(
+        content: csv,
+        fileName: 'babble_tower_vocabulary_$timestamp.csv',
+        subject: 'Babble Tower Vocabulary Export',
+        sharePositionOrigin: origin,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Export failed. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   @override
@@ -61,6 +110,30 @@ class _VocabularyScreenState extends ConsumerState<VocabularyScreen>
             fontSize: 18,
           ),
         ),
+        actions: [
+          // Wrapped in a Builder so the button has its OWN context to
+          // compute sharePositionOrigin from — the AppBar/Scaffold
+          // context above isn't scoped to this specific button's
+          // on-screen position. See _exportCsv's doc.
+          Builder(
+            builder: (buttonContext) => IconButton(
+              tooltip: 'Export as CSV',
+              icon: _exporting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colors.textSecondary,
+                      ),
+                    )
+                  : Icon(Icons.ios_share_rounded, color: colors.textPrimary),
+              onPressed: allEntries.isEmpty || _exporting
+                  ? null
+                  : () => _exportCsv(buttonContext),
+            ),
+          ),
+        ],
         bottom: TabBar(
           controller: _tabs,
           labelColor: colors.primary,
@@ -219,24 +292,31 @@ class _WordRow extends StatelessWidget {
 }
 
 class _MasteryPip extends StatelessWidget {
-  final int level; // 0–3
+  final int level; // 0–5 — see WordEntry.masteryLevel / isMastered
   final AppColors colors;
 
   const _MasteryPip({required this.level, required this.colors});
 
   @override
   Widget build(BuildContext context) {
+    // Six tiers matching WordEntry's actual 0-5 mastery range (was
+    // previously a 4-entry array clamped to 3, so levels 3, 4, AND 5
+    // all rendered as the exact same pip — a "fully mastered" word
+    // (isMastered, level 5) looked identical to a merely level-3 word.
+    // Now level 5 gets its own distinct top tier.
     final pipColors = [
       colors.border,
-      colors.accent.withValues(alpha: 0.5),
+      colors.accent.withValues(alpha: 0.35),
+      colors.accent.withValues(alpha: 0.65),
       colors.accent,
+      colors.primary.withValues(alpha: 0.6),
       colors.primary,
     ];
     return Container(
       width: 10,
       height: 10,
       decoration: BoxDecoration(
-        color: pipColors[level.clamp(0, 3)],
+        color: pipColors[level.clamp(0, 5)],
         shape: BoxShape.circle,
       ),
     );

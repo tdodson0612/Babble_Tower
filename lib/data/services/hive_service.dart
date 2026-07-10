@@ -34,8 +34,22 @@ class HiveService {
   // ---------------------------------------------------------------------------
   // Known box names — centralised to avoid magic strings across the app
   // ---------------------------------------------------------------------------
-  static const String settings       = 'settings';
-  static const String userProfile    = 'user_profile';
-  static const String readingProgress= 'reading_progress';
+
+  static const String settings        = 'settings';
+  static const String userProfile     = 'user_profile';
+  static const String readingProgress = 'reading_progress';
+
   // Vocabulary boxes are keyed dynamically: "vocab_{pairKey}"
+
+  /// Per-verse progress (Phase 6) — known words, accuracy, completion
+  /// state, retry count. Separate from [readingProgress], which only
+  /// tracks coarse block-unlock state. Keyed dynamically per language
+  /// pair: "verse_progress_{pairKey}" — see [verseProgressBoxName].
+  static String verseProgressBoxName(String pairKey) =>
+      'verse_progress_$pairKey';
+
+  /// Grammar-parsing accuracy by category (Phase 10) — keyed per language
+  /// pair: "parsing_progress_{pairKey}" — see [parsingProgressBoxName].
+  static String parsingProgressBoxName(String pairKey) =>
+      'parsing_progress_$pairKey';
 }

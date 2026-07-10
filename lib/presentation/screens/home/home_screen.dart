@@ -17,7 +17,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int? _selectedChapter;
-
   String? _resumeBook;
   int?    _resumeChapter;
   int?    _resumeBlock;
@@ -46,7 +45,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
+    final colors     = context.colors;
     final bibleState = ref.watch(bibleProvider);
 
     return Scaffold(
@@ -63,6 +62,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
         actions: [
+          // Phase 9: progress dashboard entry point.
+          IconButton(
+            icon: Icon(Icons.bar_chart_rounded, color: colors.textPrimary),
+            onPressed: () =>
+                Navigator.of(context).pushNamed('/progress'),
+          ),
           IconButton(
             icon: Icon(Icons.settings_outlined, color: colors.textPrimary),
             onPressed: () =>
@@ -78,7 +83,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             children: [
               _buildSubtitle(colors),
               const SizedBox(height: 20),
-
               if (_resumeBook != null) ...[
                 _ContinueCard(
                   book:    _resumeBook!,
@@ -88,24 +92,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
                 const SizedBox(height: 20),
               ],
-
               _buildSectionLabel('Book', colors),
               const SizedBox(height: 10),
               _buildBookPicker(bibleState, colors),
-
               if (bibleState.selectedBook != null) ...[
                 const SizedBox(height: 24),
                 _buildSectionLabel('Chapter', colors),
                 const SizedBox(height: 10),
                 _buildChapterPicker(bibleState, colors),
               ],
-
               if (bibleState.selectedBook != null &&
                   _selectedChapter != null) ...[
                 const SizedBox(height: 32),
                 _buildStartButton(bibleState, colors),
               ],
-
               const SizedBox(height: 32),
             ],
           ),
@@ -139,7 +139,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildBookPicker(BibleState bibleState, AppColors colors) {
-    final books = bibleState.availableBooks;
+    final books        = bibleState.availableBooks;
     final englishNames = getBookNames('en');
 
     if (books.isEmpty) {
@@ -160,7 +160,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         final subtitle = index < englishNames.length
             ? englishNames[index]
             : null;
-
         return _BookChip(
           label:    book,
           subtitle: subtitle,
@@ -228,12 +227,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           elevation: 0,
         ),
-        // Await loadChapter before navigating so the reader has verses ready.
         onPressed: () async {
           await ref.read(bibleProvider.notifier).loadChapter(
-                bibleState.selectedBook!,
-                _selectedChapter!,
-              );
+            bibleState.selectedBook!,
+            _selectedChapter!,
+          );
           if (mounted) Navigator.of(context).pushNamed('/reader');
         },
         child: Text(

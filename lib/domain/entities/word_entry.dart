@@ -1,31 +1,20 @@
 // lib/domain/entities/word_entry.dart
 
 class WordEntry {
-  /// The word in the target language (L2).
   final String word;
-
-  /// Composite key identifying the language pair, e.g. "en_el".
   final String languagePairKey;
 
-  /// Short translation / gloss in the user's native language (L1).
+  /// Short gloss (e.g. "word, message") — shown during quiz.
   String translation;
 
-  /// Longer definition (may equal [translation] for legacy entries).
+  /// Longer definition from Dodson lexicon (optional).
   String definition;
 
-  /// The lemma / dictionary headword (empty for legacy entries).
+  /// The dictionary lemma this form was resolved from (optional).
   String lemma;
 
-  /// Whether the user has marked this word as known.
   bool known;
-
-  /// Mastery level 0–3:
-  ///   0 = unseen
-  ///   1 = seen / marked
-  ///   2 = recalled in test
-  ///   3 = mastered (recalled across sessions)
   int masteryLevel;
-
   DateTime lastReviewed;
 
   WordEntry({
@@ -39,12 +28,10 @@ class WordEntry {
     required this.lastReviewed,
   });
 
-  /// Returns true if this word should be considered mastered.
-  bool get isMastered => masteryLevel >= 3;
-
-  /// The best available definition — long if present, else short gloss.
-  String get bestDefinition =>
-      definition.isNotEmpty ? definition : translation;
+  // masteryLevel ranges 0–5 (see Mastery System in the project handoff doc).
+  // Level 5 is the top of the scale and is treated as fully mastered:
+  // lower quiz frequency, lower spaced-repetition priority.
+  bool get isMastered => masteryLevel >= 5;
 
   WordEntry copyWith({
     String? translation,

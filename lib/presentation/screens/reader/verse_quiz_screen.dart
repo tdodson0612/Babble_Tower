@@ -1,44 +1,52 @@
 // lib/presentation/screens/reader/verse_quiz_screen.dart
-//
-// Verse-gated quiz flow (replaces the old LearnScreen + TestScreen).
-//
-// Flow:
-//   1. Words in the verse are shown one at a time.
-//   2. Each card shows the Greek word → tap to reveal gloss.
-//   3. Student self-rates: "Got it" or "Didn't know".
-//   4. After all words: score screen.
-//      ≥ 80% → verse unlocked, return to reader with success.
-//      < 80% → option to retry or go back.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../domain/entities/word_entry.dart';
+import '../../../core/constants/app_text_styles.dart';
+import '../../../core/utils/text_normalizer.dart';
+import '../../../data/services/morphology_service.dart';
+import '../../../data/services/prefs_service.dart';
+import '../../../data/services/sound_service.dart';
+import '../../../data/services/pronunciation_service.dart';
+import '../../../domain/entities/parsing_word.dart';
+import '../../../domain/quiz/quiz_engine.dart';
+import '../../../domain/quiz/quiz_models.dart';
+import '../../../domain/quiz/quiz_question.dart';
+import '../../../domain/usecases/track_parsing_progress_usecase.dart';
+import '../../../domain/usecases/track_verse_progress_usecase.dart';
 import '../../providers/vocabulary_provider.dart';
-import '../../providers/bible_provider.dart';
 
-// ---------------------------------------------------------------------------
-// Data model for one quiz item
-// ---------------------------------------------------------------------------
+/// Arguments passed via Navigator when pushing /verse_quiz.
+class VerseQuizArgs {
+  final String verseText;
+  final String verseLabel;
 
-enum _QuizResult { unanswered, correct, incorrect }
+  /// Structured identity fields for Phase 6 per-verse progress tracking.
+  final String pairKey;
+  final String book;
+  final int chapter;
+  final int verseNumber;
 
-class _QuizItem {
-  final String word;
-  final WordEntry entry;
-  _QuizResult result;
-
-  _QuizItem({
-    required this.word,
-    required this.entry,
-    this.result = _QuizResult.unanswered,
+  const VerseQuizArgs({
+    required this.verseText,
+    required this.verseLabel,
+    required this.pairKey,
+    required this.book,
+    required this.chapter,
+    required this.verseNumber,
   });
 }
 
-// ---------------------------------------------------------------------------
-// Screen
-// ---------------------------------------------------------------------------
-
+/// Multi-question-type quiz for a single verse, driven by QuizEngine.
+///
+/// Screen-level responsibilities:
+///   - Navigation / routing.
+///   - Feedback banner + "Next" gate between questions (issues #2 and #3).
+///   - Results display.
+///
+/// Everything else (selection, weighting, scoring, mastery) lives in
+/// QuizEngine. Pops true (>=80%) or false to caller.
 class VerseQuizScreen extends ConsumerStatefulWidget {
   const VerseQuizScreen({super.key});
 
@@ -47,544 +55,632 @@ class VerseQuizScreen extends ConsumerStatefulWidget {
 }
 
 class _VerseQuizScreenState extends ConsumerState<VerseQuizScreen> {
-  late List<_QuizItem> _items;
-  int  _index    = 0;
-  bool _revealed = false;
-  bool _built    = false;
+  final _verseProgress = const TrackVerseProgressUseCase();
+  final _morphologyService = MorphologyService();
+  final _parsingProgress = const TrackParsingProgressUseCase();
+  late VerseQuizArgs _args;
+
+  /// Phase 10 — grammar-parsing data for this verse, loaded once in
+  /// [_initQuiz] and reused by [_retry] so retrying doesn't re-hit the
+  /// asset bundle. Empty (the default) is the normal case for verses
+  /// that weren't tagged or didn't align — see MorphologyService's doc
+  /// comment. QuizEngine treats an empty list exactly like no morphology
+  /// data was ever passed.
+  List<ParsingWord> _morphology = const [];
+
+  QuizEngine? _engine;
+  QuizQuestion? _currentQuestion;
+  bool _initialized = false;
+  bool _done = false;
+  QuizResult? _result;
+
+  /// Stable identity for the currently-displayed question, used in the
+  /// KeyedSubtree key below. Deliberately NOT engine.totalAsked — that
+  /// increments the instant submitAnswer() runs in _onAnswered, which
+  /// happens BEFORE the feedback-banner setState, causing the STILL-
+  /// DISPLAYED question widget to see its key change and get torn down
+  /// and remounted mid-answer (fresh shuffle, reset tiles) at the exact
+  /// moment it's locked behind IgnorePointer for the banner — this is
+  /// what caused unscramble/spell/word-order tiles to appear "stuck":
+  /// they'd already been silently reset and were sitting inside an
+  /// ignoring-pointer region. Incremented ONLY in _advance(), so the
+  /// key stays stable for the whole time a question is actually on screen.
+  int _questionIndex = 0;
+
+  // ── Feedback gate state (issues #2 and #3) ────────────────────────────
+  // After the question widget fires onAnswered, we show a feedback banner
+  // and wait for the user to tap "Next" before advancing. The question
+  // widget stays visible behind the banner so the user can see what they
+  // answered and what the correct answer was.
+  bool _awaitingNext = false;
+  bool? _lastAnswerCorrect;
+  String _lastAnswerWord = '';
+  String _lastAnswerTranslation = '';
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_built) {
-      _buildItems();
-      _built = true;
+    if (_initialized) return;
+    _initialized = true;
+
+    final args = ModalRoute.of(context)!.settings.arguments as VerseQuizArgs;
+    _args = args;
+
+    _initQuiz();
+  }
+
+  /// Async because Phase 10 needs to load this verse's grammar-parsing
+  /// data (an asset read) before QuizEngine can be constructed. Until
+  /// this completes, _currentQuestion stays null and _buildQuiz shows
+  /// its existing loading spinner — no new loading state needed.
+  Future<void> _initQuiz() async {
+    final extracted = TextNormalizer.extractWords(_args.verseText);
+    final vocabState = ref.read(vocabularyProvider);
+    final quizWords = extracted
+        .toSet()
+        .map((w) => QuizWord.fromEntry(w, vocabState.entries[w]))
+        .toList();
+
+    // Phase 10 — empty list is the normal, expected outcome for verses
+    // that weren't tagged or didn't align cleanly against MorphGNT at
+    // build time (see build_morphology.py). QuizEngine simply won't
+    // offer grammarParsing questions in that case.
+    _morphology = await _morphologyService.wordsForVerse(
+      _args.book,
+      _args.chapter,
+      _args.verseNumber,
+    );
+
+    if (!mounted) return;
+
+    _engine = QuizEngine(
+      words: quizWords,
+      verseText: _args.verseText,
+      onMasteryUpdate: _handleMasteryUpdate,
+      morphology: _morphology,
+      onGrammarAnswered: _handleGrammarAnswered,
+    );
+
+    _advance();
+  }
+
+  void _handleMasteryUpdate(String word, bool correct) {
+    final notifier = ref.read(vocabularyProvider.notifier);
+    if (correct) {
+      notifier.markKnown(word);
+    } else {
+      notifier.markUnknown(word);
     }
   }
 
-  void _buildItems() {
-    final block   = ref.read(bibleProvider).currentBlock;
-    final entries = ref.read(vocabularyProvider).entries;
+  /// Phase 10 — records grammar-parsing accuracy separately from vocab
+  /// mastery. Fire-and-forget, same pattern as _completeQuiz's call to
+  /// _verseProgress.recordAttempt below: a background Hive write, not
+  /// something the UI needs to block on or react to.
+  void _handleGrammarAnswered(String categoryName, bool correct) {
+    _parsingProgress.recordAnswer(
+      pairKey: _args.pairKey,
+      categoryName: categoryName,
+      correct: correct,
+    );
+  }
 
-    if (block == null) {
-      _items = [];
+  void _advance() {
+    final engine = _engine!;
+    if (engine.isComplete) {
+      _completeQuiz(engine.buildResult());
       return;
     }
-
-    // Include every word that has a gloss — skip words with no translation.
-    _items = block.words
-        .where((w) => entries.containsKey(w) &&
-            entries[w]!.translation.isNotEmpty)
-        .map((w) => _QuizItem(word: w, entry: entries[w]!))
-        .toList()
-      ..shuffle();
+    setState(() {
+      _currentQuestion = engine.nextQuestion();
+      _questionIndex++;
+      _awaitingNext = false;
+      _lastAnswerCorrect = null;
+    });
   }
 
-  // ── Computed ──────────────────────────────────────────────────────────────
-
-  bool   get _done     => _index >= _items.length;
-  int    get _correct  => _items.where((i) => i.result == _QuizResult.correct).length;
-  double get _score    => _items.isEmpty ? 0 : _correct / _items.length;
-  bool   get _passed   => _score >= 0.8;
-
-  // ── Actions ───────────────────────────────────────────────────────────────
-
-  void _reveal() => setState(() => _revealed = true);
-
-  void _answer(bool correct) {
-    final item = _items[_index];
+  void _completeQuiz(QuizResult result) {
     setState(() {
-      item.result = correct ? _QuizResult.correct : _QuizResult.incorrect;
-      _index++;
-      _revealed = false;
+      _done = true;
+      _result = result;
+      _awaitingNext = false;
     });
 
+    // Record a session for streak tracking on every quiz completion
+    // (pass or fail). Safe to call multiple times per day.
+    PrefsService.recordSession();
+
+    final allTested = TextNormalizer.extractWords(_args.verseText).toSet();
+    final missedWordStrings = result.missedWords.map((w) => w.word).toSet();
+    final knownWords = allTested.difference(missedWordStrings);
+
+    _verseProgress.recordAttempt(
+      pairKey: _args.pairKey,
+      book: _args.book,
+      chapter: _args.chapter,
+      verseNumber: _args.verseNumber,
+      knownWords: knownWords,
+      totalWords: allTested.length,
+      passed: result.passed,
+      accuracy: result.scoreFraction,
+    );
+  }
+
+  /// Called by the question widget when the user submits an answer.
+  /// Instead of immediately advancing, we lock the question, record the
+  /// result, show feedback, and wait for "Next" tap.
+  void _onAnswered(bool correct) {
+    final engine = _engine!;
+    final question = _currentQuestion!;
+    engine.submitAnswer(question, correct);
+
+    // Sound feedback — fires immediately, before feedback banner appears.
+    // No-ops silently if audio assets aren't present yet.
     if (correct) {
-      ref.read(vocabularyProvider.notifier).markKnown(item.word);
+      SoundService.instance.playCorrect();
     } else {
-      ref.read(vocabularyProvider.notifier).markUnknown(item.word);
+      SoundService.instance.playIncorrect();
     }
+
+    setState(() {
+      _awaitingNext = true;
+      _lastAnswerCorrect = correct;
+      _lastAnswerWord = question.targetWord.word;
+      _lastAnswerTranslation = question.targetWord.translation;
+    });
+  }
+
+  void _onNext() {
+    _advance();
+  }
+
+  void _skipRemaining() {
+    _completeQuiz(_engine!.buildResult());
   }
 
   void _retry() {
+    final vocabState = ref.read(vocabularyProvider);
+    final extracted = TextNormalizer.extractWords(_args.verseText);
+    final quizWords = extracted
+        .toSet()
+        .map((w) => QuizWord.fromEntry(w, vocabState.entries[w]))
+        .toList();
     setState(() {
-      _index    = 0;
-      _revealed = false;
-      for (final item in _items) {
-        item.result = _QuizResult.unanswered;
-      }
-      _items.shuffle();
+      _engine = QuizEngine(
+        words: quizWords,
+        verseText: _args.verseText,
+        onMasteryUpdate: _handleMasteryUpdate,
+        morphology: _morphology,
+        onGrammarAnswered: _handleGrammarAnswered,
+      );
+      _done = false;
+      _result = null;
+      _awaitingNext = false;
+      _lastAnswerCorrect = null;
     });
+    _advance();
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  void _finish() {
+    Navigator.of(context).pop(_result?.passed ?? false);
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final block  = ref.watch(bibleProvider).currentBlock;
 
     return Scaffold(
       backgroundColor: colors.background,
-      appBar: _buildAppBar(block, colors),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: _items.isEmpty
-              ? _buildEmpty(colors)
-              : _done
-                  ? _buildResults(colors)
-                  : _buildCard(colors),
+      appBar: AppBar(
+        backgroundColor: colors.background,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.close, color: colors.textPrimary),
+          onPressed: () => Navigator.of(context).pop(false),
         ),
+        title: Text(
+          _args.verseLabel,
+          style: TextStyle(
+            color: colors.textPrimary,
+            fontWeight: FontWeight.w600,
+            fontSize: 17,
+          ),
+        ),
+        bottom: _done
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(4),
+                child: LinearProgressIndicator(
+                  value: _engine?.progressEstimate ?? 0,
+                  backgroundColor: colors.border,
+                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                ),
+              ),
       ),
+      body: _done ? _buildResults(colors) : _buildQuiz(colors),
     );
   }
 
-  PreferredSizeWidget _buildAppBar(dynamic block, AppColors colors) {
-    final title = _done
-        ? 'Results'
-        : 'Verse Quiz — ${_index + 1} of ${_items.length}';
+  // ── Quiz ───────────────────────────────────────────────────────────────
 
-    return AppBar(
-      backgroundColor: colors.background,
-      elevation: 0,
-      leading: IconButton(
-        icon: Icon(Icons.arrow_back_ios, color: colors.textPrimary),
-        onPressed: () => Navigator.of(context).pop(false),
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          color:      colors.textPrimary,
-          fontWeight: FontWeight.w700,
-          fontSize:   18,
+  Widget _buildQuiz(AppColors colors) {
+    final engine = _engine;
+    final question = _currentQuestion;
+
+    if (engine == null || question == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Column(
+      children: [
+        // ── Feedback banner (issues #2 and #3) ──────────────────────────
+        // Shown after the user answers. Stays visible until "Next" is
+        // tapped. Green = correct, red = wrong. Always shows the word
+        // and its translation so the user knows the right answer.
+        if (_awaitingNext && _lastAnswerCorrect != null)
+          _FeedbackBanner(
+            correct: _lastAnswerCorrect!,
+            word: _lastAnswerWord,
+            translation: _lastAnswerTranslation,
+            onNext: _onNext,
+          ),
+
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Question ${engine.totalAsked + 1}',
+                          style: TextStyle(
+                              color: colors.textSecondary, fontSize: 13),
+                        ),
+                        const SizedBox(width: 8),
+                        // Phase 7: hear the target Greek word before answering.
+                        _TtsButton(word: question.targetWord.word),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        _ScorePill(
+                          label: '✓',
+                          count: engine.correctCount,
+                          color: colors.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        _ScorePill(
+                          label: '🔥',
+                          count: engine.currentStreak,
+                          color: colors.accent,
+                        ),
+                        const SizedBox(width: 8),
+                        _ScorePill(
+                          label: 'XP',
+                          count: engine.xpEarned,
+                          color: colors.primary,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  // KeyedSubtree tears down and rebuilds question widget
+                  // state cleanly between questions so shuffled-tile types
+                  // (Spell, Unscramble, Word Order) never bleed state.
+                  child: IgnorePointer(
+                    // Lock interaction while feedback banner is showing.
+                    ignoring: _awaitingNext,
+                    child: KeyedSubtree(
+                      key: ValueKey(
+                        '${question.targetWord.word}_${question.type}'
+                        '_$_questionIndex',
+                      ),
+                      child: question.build(context, _onAnswered),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (!_awaitingNext)
+                  TextButton(
+                    onPressed: _skipRemaining,
+                    child: Text(
+                      'End quiz now',
+                      style: TextStyle(
+                          color: colors.textSecondary, fontSize: 13),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 
-  // ── Empty state ───────────────────────────────────────────────────────────
+  // ── Results ────────────────────────────────────────────────────────────
 
-  Widget _buildEmpty(AppColors colors) {
-    return Center(
+  Widget _buildResults(AppColors colors) {
+    final result = _result!;
+    final pct = (result.scoreFraction * 100).round();
+    final passed = result.passed;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.check_circle_outline,
-              size: 64, color: colors.primary),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: passed ? colors.primary : colors.accent,
+            ),
+            child: Icon(
+              passed ? Icons.check : Icons.close,
+              color: Colors.white,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 24),
           Text(
-            'All words already known!',
-            style: TextStyle(
-              fontSize:   20,
-              fontWeight: FontWeight.w700,
-              color:      colors.textPrimary,
+            passed ? 'Verse passed!' : 'Keep practicing',
+            style: AppTextStyles.subheadline(context).copyWith(
+              color: passed ? colors.primary : colors.accent,
+              fontSize: 24,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'This verse is ready to unlock.',
-            style: TextStyle(fontSize: 15, color: colors.textSecondary),
+            '$pct% — ${result.totalCorrect} of ${result.totalAsked} correct',
+            style: AppTextStyles.body(context).copyWith(fontSize: 16),
           ),
+          const SizedBox(height: 4),
+          Text(
+            '+${result.xpEarned} XP · best streak ${result.bestStreak}',
+            style: AppTextStyles.body(context).copyWith(
+              fontSize: 14,
+              color: colors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            passed
+                ? 'You can continue to the next verse.'
+                : 'Score 80% or more to continue.',
+            style: AppTextStyles.body(context),
+            textAlign: TextAlign.center,
+          ),
+          if (!passed && result.missedWords.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: result.missedWords
+                  .map((w) => Chip(
+                        label: Text(
+                          '${w.word} — ${w.translation}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        backgroundColor: colors.highlight,
+                      ))
+                  .toList(),
+            ),
+          ],
           const SizedBox(height: 40),
           SizedBox(
-            width: 220,
+            width: double.infinity,
             child: ElevatedButton(
+              onPressed: _finish,
               style: ElevatedButton.styleFrom(
-                backgroundColor: colors.primary,
+                backgroundColor: passed ? colors.primary : colors.accent,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-                elevation: 0,
-              ),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Unlock verse',
-                  style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Quiz card ─────────────────────────────────────────────────────────────
-
-  Widget _buildCard(AppColors colors) {
-    final item = _items[_index];
-
-    return Column(
-      children: [
-        // Progress bar
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value:           _index / _items.length,
-            minHeight:       6,
-            backgroundColor: colors.border,
-            valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
-          ),
-        ),
-        const SizedBox(height: 32),
-
-        // Card
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color:        colors.surface,
-              borderRadius: BorderRadius.circular(24),
-              border:       Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color:      Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 16,
-                  offset:     const Offset(0, 4),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'What does this mean?',
-                    style: TextStyle(
-                      fontSize:    13,
-                      color:       colors.textSecondary,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Greek word
-                  Text(
-                    item.word,
-                    style: TextStyle(
-                      fontSize:   52,
-                      fontWeight: FontWeight.w700,
-                      color:      colors.textPrimary,
-                      height:     1.1,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-
-                  // Lemma badge (if different from the word form)
-                  if (item.entry.lemma.isNotEmpty &&
-                      item.entry.lemma != item.word) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color:        colors.highlight,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'from ${item.entry.lemma}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color:    colors.accent,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 32),
-
-                  // Reveal / Answer
-                  if (!_revealed)
-                    _RevealButton(colors: colors, onTap: _reveal)
-                  else
-                    _GlossDisplay(entry: item.entry, colors: colors),
-                ],
+              ),
+              child: Text(
+                passed ? 'Continue →' : 'Try again',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
-        ),
-
-        const SizedBox(height: 24),
-
-        // Answer buttons (only visible after reveal)
-        if (_revealed)
-          Row(
-            children: [
-              Expanded(
-                child: _AnswerButton(
-                  label:   '✗  Didn\'t know',
-                  correct: false,
-                  colors:  colors,
-                  onTap:   () => _answer(false),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _AnswerButton(
-                  label:   '✓  Got it',
-                  correct: true,
-                  colors:  colors,
-                  onTap:   () => _answer(true),
-                ),
-              ),
-            ],
-          ),
-
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  // ── Results ───────────────────────────────────────────────────────────────
-
-  Widget _buildResults(AppColors colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        // Score circle
-        Container(
-          width:  140,
-          height: 140,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: _passed
-                ? colors.primary.withValues(alpha: 0.1)
-                : colors.accent.withValues(alpha: 0.1),
-            border: Border.all(
-              color: _passed ? colors.primary : colors.accent,
-              width: 3,
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '${(_score * 100).round()}%',
-                style: TextStyle(
-                  fontSize:   36,
-                  fontWeight: FontWeight.w700,
-                  color:      _passed ? colors.primary : colors.accent,
-                ),
-              ),
-              Text(
-                '$_correct / ${_items.length}',
-                style: TextStyle(
-                    fontSize: 14, color: colors.textSecondary),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 28),
-
-        Text(
-          _passed ? 'Verse unlocked!' : 'Keep going',
-          style: TextStyle(
-            fontSize:   26,
-            fontWeight: FontWeight.w700,
-            color:      colors.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _passed
-              ? 'Great work! You can read this verse.'
-              : 'You need 80% to unlock this verse. Try again!',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 15,
-            color:    colors.textSecondary,
-            height:   1.5,
-          ),
-        ),
-        const SizedBox(height: 24),
-
-        // Word review list
-        Expanded(
-          child: ListView.separated(
-            itemCount: _items.length,
-            separatorBuilder: (_, __) =>
-                Divider(color: colors.border, height: 1),
-            itemBuilder: (_, i) {
-              final item    = _items[i];
-              final correct = item.result == _QuizResult.correct;
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  correct
-                      ? Icons.check_circle_outline
-                      : Icons.cancel_outlined,
-                  color: correct ? colors.primary : colors.accent,
-                ),
-                title: Text(
-                  item.word,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color:      colors.textPrimary,
-                  ),
-                ),
-                subtitle: Text(
-                  item.entry.translation,
-                  style: TextStyle(color: colors.textSecondary),
-                ),
-              );
-            },
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // Action buttons
-        Row(
-          children: [
-            if (!_passed) ...[
-              Expanded(
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    side: BorderSide(color: colors.border),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: _retry,
-                  child: Text('Try again',
-                      style: TextStyle(color: colors.textPrimary)),
-                ),
-              ),
-              const SizedBox(width: 12),
-            ],
-            Expanded(
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _passed ? colors.primary : colors.border,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  elevation: 0,
-                ),
-                // Return true = passed (verse should unlock), false = did not pass
-                onPressed: () => Navigator.of(context).pop(_passed),
-                child: Text(
-                  _passed ? 'Continue reading' : 'Back to verse',
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w600),
-                ),
+          if (!passed) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: _retry,
+              child: Text(
+                'Retry this verse',
+                style: TextStyle(color: colors.primary),
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Sub-widgets
-// ---------------------------------------------------------------------------
-
-class _RevealButton extends StatelessWidget {
-  final AppColors  colors;
-  final VoidCallback onTap;
-  const _RevealButton({required this.colors, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-        decoration: BoxDecoration(
-          color: colors.accent.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colors.accent.withValues(alpha: 0.3)),
-        ),
-        child: Text(
-          'Tap to reveal',
-          style: TextStyle(
-            fontSize:   16,
-            color:      colors.accent,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class _GlossDisplay extends StatelessWidget {
-  final WordEntry  entry;
-  final AppColors  colors;
-  const _GlossDisplay({required this.entry, required this.colors});
+// ── Feedback banner ───────────────────────────────────────────────────────
+// Shown at the top of the quiz area after every answer (issues #2 + #3).
+// Displays correct/wrong status, the word, and its translation so the user
+// knows the right answer before tapping Next.
 
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Short gloss — large and prominent
-        Text(
-          entry.translation,
-          style: TextStyle(
-            fontSize:   28,
-            fontWeight: FontWeight.w700,
-            color:      colors.accent,
-            height:     1.3,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        // Longer definition — if different and non-empty
-        if (entry.definition.isNotEmpty &&
-            entry.definition != entry.translation) ...[
-          const SizedBox(height: 12),
-          Text(
-            entry.definition,
-            style: TextStyle(
-              fontSize: 14,
-              color:    colors.textSecondary,
-              height:   1.5,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ],
-    );
-  }
-}
+class _FeedbackBanner extends StatelessWidget {
+  final bool correct;
+  final String word;
+  final String translation;
+  final VoidCallback onNext;
 
-class _AnswerButton extends StatelessWidget {
-  final String     label;
-  final bool       correct;
-  final AppColors  colors;
-  final VoidCallback onTap;
-
-  const _AnswerButton({
-    required this.label,
+  const _FeedbackBanner({
     required this.correct,
-    required this.colors,
-    required this.onTap,
+    required this.word,
+    required this.translation,
+    required this.onNext,
   });
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    final bg = correct
+        ? colors.primary.withValues(alpha: 0.12)
+        : colors.accent.withValues(alpha: 0.12);
+    final fg = correct ? colors.primary : colors.accent;
+    final icon = correct ? Icons.check_circle_outline : Icons.cancel_outlined;
+    final label = correct ? 'Correct!' : 'Not quite.';
+
+    return Container(
+      color: bg,
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+      child: Row(
+        children: [
+          Icon(icon, color: fg, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                Text(
+                  '$word  —  ${translation.isNotEmpty ? translation : "(no translation)"}',
+                  style: TextStyle(
+                    color: fg.withValues(alpha: 0.85),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: onNext,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: fg,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text(
+              'Next',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── TTS button ────────────────────────────────────────────────────────────
+// Reusable speaker button for the quiz screen. Plays authentic Modern
+// Greek audio for the target word via PronunciationService.speakKoine —
+// which, after this session's pronunciation-system rollback, is just an
+// alias for the plain Modern Greek voice (see PronunciationService's
+// class doc). Called via speakKoine() rather than speak() only so this
+// call site doesn't need to change if a genuinely distinct Koine audio
+// path is ever reintroduced later; today, both methods do the same thing.
+
+class _TtsButton extends StatefulWidget {
+  final String word;
+  const _TtsButton({required this.word});
+
+  @override
+  State<_TtsButton> createState() => _TtsButtonState();
+}
+
+class _TtsButtonState extends State<_TtsButton> {
+  static const _pronunciation = PronunciationService();
+  bool _speaking = false;
+
+  Future<void> _tap() async {
+    if (_speaking) {
+      await _pronunciation.stop();
+      setState(() => _speaking = false);
+    } else {
+      setState(() => _speaking = true);
+      await _pronunciation.speakKoine(widget.word);
+      if (mounted) setState(() => _speaking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+      onTap: _tap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(
-          color: correct ? colors.primary : colors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: correct ? colors.primary : colors.border),
+          color: _speaking
+              ? colors.primary.withValues(alpha: 0.15)
+              : colors.highlight,
+          borderRadius: BorderRadius.circular(8),
         ),
         alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize:   15,
-            fontWeight: FontWeight.w600,
-            color:      correct ? Colors.white : colors.textPrimary,
-          ),
+        child: Icon(
+          _speaking ? Icons.stop_rounded : Icons.volume_up_rounded,
+          size: 16,
+          color: _speaking ? colors.primary : colors.textSecondary,
+        ),
+      ),
+    );
+  }
+}
+
+class _ScorePill extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color;
+
+  const _ScorePill({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        '$label $count',
+        style: TextStyle(
+          color: color,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
