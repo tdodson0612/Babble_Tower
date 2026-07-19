@@ -13,6 +13,7 @@ import 'presentation/screens/onboarding/alphabet_screen.dart';
 import 'presentation/screens/home/home_screen.dart';
 import 'presentation/screens/reader/reader_screen.dart';
 import 'presentation/screens/reader/verse_quiz_screen.dart';
+import 'presentation/screens/review/review_session_screen.dart';
 import 'presentation/screens/vocabulary/vocabulary_screen.dart';
 import 'presentation/screens/settings/settings_screen.dart';
 
@@ -31,6 +32,7 @@ class BabbleTowerApp extends ConsumerWidget {
         scaffoldBackgroundColor: AppColors.light.background,
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.light.primary,
+          secondary: AppColors.light.secondary,
           brightness: Brightness.light,
         ),
         useMaterial3: true,
@@ -40,6 +42,7 @@ class BabbleTowerApp extends ConsumerWidget {
         scaffoldBackgroundColor: AppColors.dark.background,
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.dark.primary,
+          secondary: AppColors.dark.secondary,
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
@@ -77,6 +80,14 @@ class BabbleTowerApp extends ConsumerWidget {
             return MaterialPageRoute(
               builder: (_) => const VerseQuizScreen(),
               settings: settings,
+            );
+          case '/review':
+            // Spaced-repetition review session. Takes no arguments —
+            // unlike /verse_quiz, it computes its own due-word list
+            // internally (see ReviewSessionScreen._initSession) rather
+            // than depending on a caller to pass verse-scoped words.
+            return MaterialPageRoute(
+              builder: (_) => const ReviewSessionScreen(),
             );
           case '/vocabulary':
             return MaterialPageRoute(

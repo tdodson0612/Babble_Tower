@@ -32,18 +32,33 @@ typedef GrammarAnswerCallback = void Function(
 
 /// Drives a single verse quiz session end-to-end.
 ///
-/// Responsibilities (and ONLY these — see Phase 4 in the handoff doc,
-/// "Core engine only handles: question selection, score tracking, mastery
-/// updates, rule enforcement"):
-///   - Building the question queue from the verse's vocabulary.
+/// Responsibilities:
+///   - Building the question queue from the verse's vocabulary — ONE
+///     question per word, no re-asks (see the redesign note below).
 ///   - Selecting which question type to use for each word.
-///   - Weighting low-mastery words to appear more frequently.
-///   - Re-asking incorrect answers near the end of the same quiz.
 ///   - Tracking score, XP, and streak.
 ///   - Reporting mastery changes via [onMasteryUpdate].
 ///
 /// It does NOT know how any individual question type renders itself —
 /// that is entirely encapsulated inside each QuizQuestion implementation.
+///
+/// REDESIGNED (this session) from an earlier version that ran a double
+/// pass over every word (each word asked twice) plus re-asked any wrong
+/// answer immediately, on real user feedback that quizzes had become too
+/// long. Now: each word is asked EXACTLY ONCE, via one randomly-chosen
+/// eligible question type — no double pass, no re-ask, no mastery-based
+/// frequency weighting (weighting to ask low-mastery words MORE OFTEN
+/// doesn't make sense once every word is capped at exactly one
+/// appearance — a word either appears once or not at all).
+///
+/// Matching Pairs needs special handling under this "once per word" rule:
+/// it shows 4 words on screen at once (1 nominal target + 3 companions),
+/// and ALL 4 should count as asked — not just the nominal target — or
+/// the 3 companions would just get queued again separately later,
+/// silently reintroducing the "too long" problem for a subset of words.
+/// So THIS engine (not MatchingPairsQuestion itself) chooses which 3
+/// companion words go into each Matching Pairs board, so it can mark all
+/// 4 as consumed at once. See _pickMatchingPairsCompanions.
 class QuizEngine {
   QuizEngine({
     required List<QuizWord> words,
@@ -74,9 +89,8 @@ class QuizEngine {
   /// as before this change.
   final Map<String, ParsingWord> _morphologyByWord;
 
-  /// The full ordered queue of (word, type) pairs to ask this session.
-  /// Built once at construction; re-asks are appended dynamically as
-  /// incorrect answers come in, per the "re-ask near end" rule.
+  /// The full ordered queue of questions to ask this session. Built once
+  /// at construction — no items are ever appended afterward (no re-ask).
   final List<_QueueItem> _queue = [];
 
   int _position = 0;
@@ -85,11 +99,10 @@ class QuizEngine {
   int _bestStreak = 0;
   int _xpEarned = 0;
   final List<QuizAnswerRecord> _history = [];
-  final Set<String> _wordsNeedingReask = {};
 
   // ── Public surface ─────────────────────────────────────────────────────
 
-  /// True once every queued question (including re-asks) has been answered.
+  /// True once every queued question has been answered.
   bool get isComplete => _position >= _queue.length;
 
   int get totalAsked => _history.length;
@@ -97,9 +110,13 @@ class QuizEngine {
   int get currentStreak => _streak;
   int get xpEarned => _xpEarned;
 
-  /// 0-based progress for a progress bar: answered / total-known-so-far.
-  /// Total grows if re-asks are appended, so this is intentionally an
-  /// estimate rather than a fixed denominator.
+  /// 0-based progress for a progress bar: answered / total questions.
+  /// NOTE: total QUESTIONS, not total WORDS — a Matching Pairs question
+  /// covers 4 words in one queue slot, so this denominator (and
+  /// totalAsked) will legitimately be smaller than _allWords.length
+  /// whenever any Matching Pairs questions were selected. That's
+  /// expected, not a bug: fewer total steps for the same word coverage
+  /// is the whole point of this session's redesign.
   double get progressEstimate =>
       _queue.isEmpty ? 0 : _position / _queue.length;
 
@@ -113,9 +130,13 @@ class QuizEngine {
   }
 
   /// Must be called once per question, immediately after the question
-  /// widget reports an answer. Advances the queue, updates score/streak/XP,
-  /// schedules a re-ask if incorrect, and reports the mastery change.
+  /// widget reports an answer. Advances the queue, updates score/streak/
+  /// XP, and reports the mastery change for every word this question
+  /// covered (see class doc re: Matching Pairs covering 4 words at once).
   void submitAnswer(QuizQuestion question, bool correct) {
+    // _position hasn't advanced yet, so this is guaranteed to be the
+    // same item nextQuestion() just built the given question from.
+    final item = _queue[_position];
     final word = question.targetWord;
 
     _history.add(QuizAnswerRecord(
@@ -131,16 +152,20 @@ class QuizEngine {
       _xpEarned += QuizScoring.xpForCorrectAnswer(_streak);
     } else {
       _streak = 0;
-      // Schedule a re-ask near the end, but only once per word per
-      // session — repeated misses on the same word don't keep stacking
-      // duplicate re-asks.
-      if (!_wordsNeedingReask.contains(word.word)) {
-        _wordsNeedingReask.add(word.word);
-        _queue.add(_QueueItem(word: word, type: _pickReaskType(word)));
-      }
+      // Deliberately NO re-ask, per this session's redesign — every
+      // word is asked exactly once, correct or not.
     }
 
-    _onMasteryUpdate(word.word, correct);
+    // Report mastery for EVERY word this question covered, not just the
+    // nominal target. For most question types item.coveredWords is just
+    // [word]; for matchingPairs it's all 4 words shown on that board —
+    // all 4 get the SAME correctness verdict (whether the nominal target
+    // was matched right), a deliberate simplification rather than
+    // tracking each of the 4 independently (which would need changing
+    // the shared onAnswered(bool) callback every question type uses).
+    for (final coveredWord in item.coveredWords) {
+      _onMasteryUpdate(coveredWord.word, correct);
+    }
 
     // Phase 10 — grammarParsing answers additionally report to grammar
     // accuracy tracking. This is purely additive: vocab mastery above
@@ -169,12 +194,15 @@ class QuizEngine {
       if (!record.correct) {
         missed[record.word.word] = record.word;
       } else {
-        // A later correct re-ask removes the word from "missed" — the
-        // doc's spec is about words still wrong at quiz end, not words
-        // that were ever wrong during the session.
         missed.remove(record.word.word);
       }
     }
+    // NOTE: missedWords only reflects each question's nominal target,
+    // same as _history — a Matching Pairs board's 3 companion words
+    // never get their own QuizAnswerRecord, so an individually-wrong
+    // companion (rare — the board requires completing all 4 pairs)
+    // won't appear in this list even though its mastery was decremented
+    // above. Known, minor, deliberately out of scope for this redesign.
 
     return QuizResult(
       totalAsked: _history.length,
@@ -186,93 +214,93 @@ class QuizEngine {
   }
 
   // ── Queue construction ────────────────────────────────────────────────
+  // Single pass: every word is visited once, in shuffled order. A word
+  // already swept into an earlier Matching Pairs board (as a companion)
+  // is skipped when its own turn comes up — it's already been asked.
 
-  /// quizLength = (vocab words × 2) + re-asked incorrect answers.
-  /// Re-asks are appended dynamically in [submitAnswer], so this only
-  /// builds the base 2x pass here.
   void _buildQueue() {
-    final weighted = _weightedWordOrder();
+    final order = List<QuizWord>.from(_allWords)..shuffle(_random);
+    final consumed = <String>{};
 
-    // First pass and second pass both drawn from the same weighted order,
-    // reshuffled independently so the two appearances of a word don't
-    // land back-to-back by coincidence more than chance allows.
-    final firstPass = List<QuizWord>.from(weighted)..shuffle(_random);
-    final secondPass = List<QuizWord>.from(weighted)..shuffle(_random);
+    for (final w in order) {
+      if (consumed.contains(w.word)) continue;
 
-    for (final w in firstPass) {
-      _queue.add(_QueueItem(word: w, type: _pickTypeFor(w)));
-    }
-    for (final w in secondPass) {
-      _queue.add(_QueueItem(word: w, type: _pickTypeFor(w)));
-    }
+      final type = _pickTypeFor(w, consumed);
 
-    // Final shuffle so the two passes interleave rather than appearing
-    // as two visible halves — "questions randomly mixed across types,
-    // no predictable patterns".
-    _queue.shuffle(_random);
-  }
-
-  /// Builds a word list where low-mastery words (0–2) appear more often
-  /// than higher-mastery words, per the weighted-selection requirement.
-  /// This list is the basis for BOTH passes of quizLength, so the
-  /// weighting compounds across the full quiz rather than just once.
-  List<QuizWord> _weightedWordOrder() {
-    final result = <QuizWord>[];
-    for (final w in _allWords) {
-      final weight = _weightForMastery(w.masteryLevel);
-      for (var i = 0; i < weight; i++) {
-        result.add(w);
+      if (type == QuizQuestionType.matchingPairs) {
+        final companions = _pickMatchingPairsCompanions(w, consumed);
+        consumed.add(w.word);
+        for (final c in companions) {
+          consumed.add(c.word);
+        }
+        _queue.add(_QueueItem(
+          word: w,
+          coveredWords: [w, ...companions],
+          type: type,
+        ));
+      } else {
+        consumed.add(w.word);
+        _queue.add(_QueueItem(word: w, coveredWords: [w], type: type));
       }
     }
-    return result;
   }
 
-  int _weightForMastery(int masteryLevel) {
-    if (masteryLevel <= 2) return 3;
-    if (masteryLevel <= 4) return 2;
-    return 1; // mastered (5) — lowest frequency, never zero so it still
-    // satisfies "every word appears at least once per quiz".
-  }
-
-  // ── Question type selection ──────────────────────────────────────────
-
-  /// Picks a question type for a normal (first/second pass) appearance.
-  /// Excludes types that can't function for this word (e.g. fill-in-blank
-  /// and tap-in-context need the word to actually appear in verse text;
-  /// grammarParsing needs aligned morphology data for this specific word).
-  QuizQuestionType _pickTypeFor(QuizWord word) {
-    final eligible = _eligibleTypes(word);
+  QuizQuestionType _pickTypeFor(QuizWord word, Set<String> consumed) {
+    final eligible = _eligibleTypes(word, consumed);
     return eligible[_random.nextInt(eligible.length)];
   }
 
-  /// Re-asks deliberately favor simpler, more diagnostic types
-  /// (multiple choice) over construction-heavy types (word order,
-  /// unscramble), since the goal is confirming recall, not re-testing
-  /// production skills the user already struggled with once.
-  QuizQuestionType _pickReaskType(QuizWord word) {
-    final simple = [
-      QuizQuestionType.greekToEnglishMc,
-      QuizQuestionType.englishToGreekMc,
-    ];
-    return simple[_random.nextInt(simple.length)];
-  }
-
-  List<QuizQuestionType> _eligibleTypes(QuizWord word) {
+  /// Excludes types that can't function for this word (e.g. fill-in-blank
+  /// and tap-in-context need the word to actually appear in verse text;
+  /// grammarParsing needs aligned morphology data for this specific word;
+  /// matchingPairs needs at least 3 other still-unconsumed, valid words
+  /// left to pair it with — see _countValidCompanions).
+  List<QuizQuestionType> _eligibleTypes(QuizWord word, Set<String> consumed) {
     final inVerse = _verseText.contains(word.word);
     final parsingWord = _morphologyByWord[word.word];
     final hasGrammarData = parsingWord != null && parsingWord.isQuizzable;
+    final matchingPairsViable =
+        _countValidCompanions(word, consumed) >= 3;
+
     return [
       QuizQuestionType.greekToEnglishMc,
       QuizQuestionType.englishToGreekMc,
       QuizQuestionType.spellTheWord,
       QuizQuestionType.unscramble,
-      QuizQuestionType.matchingPairs,
+      if (matchingPairsViable) QuizQuestionType.matchingPairs,
       if (inVerse) QuizQuestionType.verseFillInBlank,
       if (inVerse) QuizQuestionType.tapWordInContext,
       QuizQuestionType.wordOrderChallenge,
       if (hasGrammarData) QuizQuestionType.grammarParsing,
-      QuizQuestionType.listeningRecognition, // Phase 7 complete — TTS wired
+      QuizQuestionType.listeningRecognition,
     ];
+  }
+
+  /// Same validity filter the original MatchingPairsQuestion used
+  /// internally (non-empty word/translation) — now applied here, since
+  /// this engine is the one choosing companions.
+  bool _isValidMatchCandidate(QuizWord w) =>
+      w.translation.isNotEmpty && w.word.isNotEmpty;
+
+  int _countValidCompanions(QuizWord word, Set<String> consumed) {
+    return _allWords
+        .where((w) =>
+            w.word != word.word &&
+            !consumed.contains(w.word) &&
+            _isValidMatchCandidate(w))
+        .length;
+  }
+
+  List<QuizWord> _pickMatchingPairsCompanions(
+      QuizWord word, Set<String> consumed) {
+    final candidates = _allWords
+        .where((w) =>
+            w.word != word.word &&
+            !consumed.contains(w.word) &&
+            _isValidMatchCandidate(w))
+        .toList()
+      ..shuffle(_random);
+    return candidates.take(3).toList();
   }
 
   // ── Question construction ─────────────────────────────────────────────
@@ -282,7 +310,8 @@ class QuizEngine {
   /// question classes — adding an 11th type means adding one case here
   /// and one entry in QuizQuestionType, nothing else in this file changes.
   QuizQuestion _buildQuestion(_QueueItem item) {
-    final distractorPool = _allWords.where((w) => w.word != item.word.word).toList();
+    final distractorPool =
+        _allWords.where((w) => w.word != item.word.word).toList();
 
     switch (item.type) {
       case QuizQuestionType.greekToEnglishMc:
@@ -302,9 +331,14 @@ class QuizEngine {
       case QuizQuestionType.unscramble:
         return UnscrambleQuestion(target: item.word, random: _random);
       case QuizQuestionType.matchingPairs:
+        // item.coveredWords is [target, ...3 companions] — see
+        // _buildQueue. Strip the target back out since
+        // MatchingPairsQuestion takes them separately.
+        final companions =
+            item.coveredWords.where((w) => w.word != item.word.word).toList();
         return MatchingPairsQuestion(
           target: item.word,
-          distractorPool: distractorPool,
+          otherWords: companions,
           random: _random,
         );
       case QuizQuestionType.verseFillInBlank:
@@ -328,9 +362,8 @@ class QuizEngine {
         );
       case QuizQuestionType.grammarParsing:
         // _eligibleTypes only offers this type when _morphologyByWord
-        // has an entry, but _pickReaskType never selects it either, so
-        // this lookup is safe; the ! documents that invariant rather
-        // than silently swallowing a null.
+        // has an entry, so this lookup is safe; the ! documents that
+        // invariant rather than silently swallowing a null.
         final parsingWord = _morphologyByWord[item.word.word]!;
         return GrammarParsingQuestion(
           target: item.word,
@@ -349,7 +382,20 @@ class QuizEngine {
 }
 
 class _QueueItem {
+  /// The nominal target — used for question construction, TTS button,
+  /// feedback banner text, and QuizAnswerRecord/missedWords tracking.
   final QuizWord word;
+
+  /// EVERY word this question covers/scores. Equal to [word] alone for
+  /// every type except matchingPairs, where it's [word, ...3 companions]
+  /// — see QuizEngine class doc for why all 4 need tracking together.
+  final List<QuizWord> coveredWords;
+
   final QuizQuestionType type;
-  const _QueueItem({required this.word, required this.type});
+
+  const _QueueItem({
+    required this.word,
+    required this.coveredWords,
+    required this.type,
+  });
 }

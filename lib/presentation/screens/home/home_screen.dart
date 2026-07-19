@@ -7,6 +7,7 @@ import '../../../core/constants/book_names.dart';
 import '../../../core/constants/supported_languages.dart';
 import '../../../data/services/prefs_service.dart';
 import '../../providers/bible_provider.dart';
+import '../../widgets/review_entry_point.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -62,6 +63,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
         actions: [
+          // Spaced-repetition review entry point. Self-contained widget
+          // (watches its own due-count provider) — see
+          // review_entry_point.dart.
+          const ReviewIconButton(),
           // Phase 9: progress dashboard entry point.
           IconButton(
             icon: Icon(Icons.bar_chart_rounded, color: colors.textPrimary),

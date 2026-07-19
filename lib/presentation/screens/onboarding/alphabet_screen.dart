@@ -4,12 +4,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/alphabet_data.dart';
+import '../../../data/services/sound_service.dart';
+import '../../../domain/alphabet/alphabet_quiz_engine.dart';
 import '../../providers/user_profile_provider.dart';
 
-/// Teaches the Greek alphabet. This is now a mandatory first step for
-/// every user — Babble Tower has a single fixed pair (English speakers
-/// reading Koine Greek), so there is no "skip if Latin script" branch
-/// anymore.
+/// Teaches the Greek alphabet, 5 letters at a time. This is a mandatory
+/// first step for every user — Babble Tower has a single fixed pair
+/// (English speakers reading Koine Greek), so there is no "skip if Latin
+/// script" branch.
+///
+/// REPLACES an earlier flat 24-letter flashcard-only flow, on the
+/// finding that recognizing a letter, sounding it out, and knowing its
+/// name are three genuinely different skills that flashcards alone
+/// don't test. Now: for each group of 5 letters — teach (flashcard,
+/// tap to reveal), then a 15-question quiz (3 skills × 5 letters,
+/// shuffled) — before moving to the next group. See
+/// AlphabetQuizEngine's doc for the full design reasoning.
+///
+/// The only hard gate on reaching verses is finishing every group OR
+/// tapping "Skip" (always available) — no per-group score threshold.
 class AlphabetScreen extends ConsumerStatefulWidget {
   const AlphabetScreen({super.key});
 
@@ -18,51 +31,72 @@ class AlphabetScreen extends ConsumerStatefulWidget {
 }
 
 class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
-  int _currentIndex = 0;
+  final _engine = AlphabetQuizEngine();
+
+  // Teach-phase state
   bool _revealed = false;
-  final Set<int> _mastered = {};
 
-  static const AlphabetData _data = greekAlphabetData;
+  // Quiz-phase state
+  int? _selectedOption;
+  bool _answerLocked = false;
+  bool _showGroupSummary = false;
 
-  LetterEntry get _current => _data.letters[_currentIndex];
-  int get _total => _data.letters.length;
-  double get _progress => (_currentIndex + 1) / _total;
-
-  Future<void> _next() async {
-    if (_currentIndex < _total - 1) {
-      setState(() {
-        _currentIndex++;
-        _revealed = false;
-      });
-    } else {
-      // Last letter — mark alphabet complete before navigating
-      await ref.read(userProfileProvider.notifier).completeAlphabet();
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/home');
-      }
-    }
-  }
-
-  void _prev() {
-    if (_currentIndex > 0) {
-      setState(() {
-        _currentIndex--;
-        _revealed = false;
-      });
-    }
-  }
-
-  Future<void> _markMastered() async {
-    setState(() => _mastered.add(_currentIndex));
-    await _next();
-  }
+  // ── Actions ────────────────────────────────────────────────────────────
 
   Future<void> _skipAll() async {
     await ref.read(userProfileProvider.notifier).completeAlphabet();
-    if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/home');
-    }
+    if (mounted) Navigator.of(context).pushReplacementNamed('/home');
   }
+
+  Future<void> _finish() async {
+    await ref.read(userProfileProvider.notifier).completeAlphabet();
+    if (mounted) Navigator.of(context).pushReplacementNamed('/home');
+  }
+
+  void _advanceTeach() {
+    setState(() {
+      _engine.advanceTeach();
+      _revealed = false;
+    });
+  }
+
+  void _selectOption(int index) {
+    if (_answerLocked) return;
+    final correct = index == _engine.currentQuestion!.correctIndex;
+
+    setState(() {
+      _selectedOption = index;
+      _answerLocked = true;
+    });
+
+    if (correct) {
+      SoundService.instance.playCorrect();
+    } else {
+      SoundService.instance.playIncorrect();
+    }
+
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      setState(() {
+        _engine.submitQuizAnswer(index);
+        _selectedOption = null;
+        _answerLocked = false;
+        if (_engine.isGroupQuizComplete) {
+          _showGroupSummary = true;
+        }
+      });
+    });
+  }
+
+  void _continueToNextGroup() {
+    setState(() {
+      _engine.advanceGroup();
+      _showGroupSummary = false;
+      _revealed = false;
+    });
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -70,102 +104,101 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
 
     return Scaffold(
       backgroundColor: colors.background,
-      appBar: _buildAppBar(colors),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: Column(
-            children: [
-              _buildProgressBar(colors),
-              const SizedBox(height: 8),
-              _buildProgressLabel(colors),
-              const SizedBox(height: 32),
-              Expanded(child: _buildCard(colors)),
-              const SizedBox(height: 24),
-              _buildControls(colors),
-              const SizedBox(height: 16),
-            ],
-          ),
+      appBar: AppBar(
+        backgroundColor: colors.background,
+        elevation: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${greekAlphabetData.languageName} Alphabet',
+              style: TextStyle(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 18,
+              ),
+            ),
+            Text(
+              greekAlphabetData.scriptNote,
+              style: TextStyle(color: colors.textSecondary, fontSize: 11),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
-      ),
-    );
-  }
-
-  PreferredSizeWidget _buildAppBar(AppColors colors) {
-    return AppBar(
-      backgroundColor: colors.background,
-      elevation: 0,
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${_data.languageName} Alphabet',
-            style: TextStyle(
-              color: colors.textPrimary,
-              fontWeight: FontWeight.w700,
-              fontSize: 18,
-            ),
-          ),
-          Text(
-            _data.scriptNote,
-            style: TextStyle(
-              color: colors.textSecondary,
-              fontSize: 11,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        actions: [
+          TextButton(
+            onPressed: _skipAll,
+            child: Text('Skip', style: TextStyle(color: colors.accent)),
           ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: _skipAll,
-          child: Text(
-            'Skip',
-            style: TextStyle(color: colors.accent),
-          ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: _showGroupSummary
+              ? _buildGroupSummary(colors)
+              : _engine.isTeachPhase
+                  ? _buildTeachPhase(colors)
+                  : _buildQuizPhase(colors),
         ),
-      ],
-    );
-  }
-
-  Widget _buildProgressBar(AppColors colors) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(4),
-      child: LinearProgressIndicator(
-        value: _progress,
-        minHeight: 6,
-        backgroundColor: colors.border,
-        color: colors.primary,
       ),
     );
   }
 
-  Widget _buildProgressLabel(AppColors colors) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  // ── Teach phase ──────────────────────────────────────────────────────
+
+  Widget _buildTeachPhase(AppColors colors) {
+    return Column(
       children: [
-        Text(
-          '${_currentIndex + 1} of $_total',
-          style: TextStyle(
-            fontSize: 12,
-            color: colors.textSecondary,
+        _buildTeachProgress(colors),
+        const SizedBox(height: 32),
+        Expanded(
+          child: Center(
+            child: SingleChildScrollView(child: _buildTeachCard(colors)),
           ),
         ),
-        Text(
-          '${_mastered.length} mastered',
-          style: TextStyle(
-            fontSize: 12,
+        const SizedBox(height: 24),
+        _buildTeachControls(colors),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _buildTeachProgress(AppColors colors) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: (_engine.teachIndex + 1) / _engine.teachTotal,
+            minHeight: 6,
+            backgroundColor: colors.border,
             color: colors.primary,
-            fontWeight: FontWeight.w600,
           ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Group ${_engine.currentGroupNumber} of ${_engine.groupCount}',
+              style: TextStyle(fontSize: 12, color: colors.textSecondary),
+            ),
+            Text(
+              'Letter ${_engine.teachIndex + 1} of ${_engine.teachTotal}',
+              style: TextStyle(fontSize: 12, color: colors.textSecondary),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildCard(AppColors colors) {
-    final isRtl = _data.isRtl;
+  Widget _buildTeachCard(AppColors colors) {
+    final letter = _engine.currentTeachLetter;
+    final isRtl = greekAlphabetData.isRtl;
 
     return GestureDetector(
       onTap: () => setState(() => _revealed = !_revealed),
@@ -175,12 +208,7 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
         decoration: BoxDecoration(
           color: colors.surface,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: _mastered.contains(_currentIndex)
-                ? colors.primary.withValues(alpha: 0.4)
-                : colors.border,
-            width: _mastered.contains(_currentIndex) ? 2 : 1,
-          ),
+          border: Border.all(color: colors.border),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.04),
@@ -194,14 +222,12 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Main character
               Directionality(
-                textDirection:
-                    isRtl ? TextDirection.rtl : TextDirection.ltr,
+                textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
                 child: Text(
-                  _current.uppercase != null
-                      ? '${_current.uppercase}  ${_current.character}'
-                      : _current.character,
+                  letter.uppercase != null
+                      ? '${letter.uppercase}  ${letter.character}'
+                      : letter.character,
                   style: TextStyle(
                     fontSize: isRtl ? 72 : 80,
                     fontWeight: FontWeight.w700,
@@ -212,17 +238,15 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // Romanization
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   color: colors.accent.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  _current.romanized,
+                  letter.name,
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
@@ -230,9 +254,12 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 4),
+              Text(
+                'romanized: ${letter.romanized}',
+                style: TextStyle(fontSize: 12, color: colors.textSecondary),
+              ),
               const SizedBox(height: 28),
-
-              // Tap to reveal
               if (!_revealed)
                 Text(
                   'Tap to reveal pronunciation',
@@ -243,9 +270,8 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
                   ),
                 )
               else ...[
-                // Pronunciation
                 Text(
-                  _current.pronunciation,
+                  letter.pronunciation,
                   style: TextStyle(
                     fontSize: 17,
                     color: colors.textPrimary,
@@ -253,11 +279,10 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
                   ),
                   textAlign: TextAlign.center,
                 ),
-                if (_current.ipa != null &&
-                    _current.ipa!.isNotEmpty) ...[
+                if (letter.ipa != null && letter.ipa!.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'IPA: /${_current.ipa}/',
+                    'IPA: /${letter.ipa}/',
                     style: TextStyle(
                       fontSize: 13,
                       color: colors.textSecondary,
@@ -268,13 +293,10 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
                 const SizedBox(height: 24),
                 Divider(color: colors.border),
                 const SizedBox(height: 16),
-
-                // Example word
                 Directionality(
-                  textDirection:
-                      isRtl ? TextDirection.rtl : TextDirection.ltr,
+                  textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
                   child: Text(
-                    _current.exampleWord,
+                    letter.exampleWord,
                     style: TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.w600,
@@ -284,7 +306,7 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '"${_current.exampleMeaning}"',
+                  '"${letter.exampleMeaning}"',
                   style: TextStyle(
                     fontSize: 15,
                     color: colors.textSecondary,
@@ -299,98 +321,200 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
     );
   }
 
-  Widget _buildControls(AppColors colors) {
-    final isLast = _currentIndex == _total - 1;
+  Widget _buildTeachControls(AppColors colors) {
+    final isLastInGroup = _engine.isLastTeachLetterInGroup;
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _advanceTeach,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: colors.primary,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+        ),
+        child: Text(
+          isLastInGroup ? 'Start quiz →' : 'Next letter →',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
 
+  // ── Quiz phase ───────────────────────────────────────────────────────
+
+  Widget _buildQuizPhase(AppColors colors) {
     return Column(
       children: [
-        // Mark mastered button
-        if (_revealed)
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: colors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 0,
-              ),
-              onPressed: _markMastered,
-              child: Text(
-                _mastered.contains(_currentIndex)
-                    ? '✓ Mastered'
-                    : isLast
-                        ? 'Finish & Start Reading'
-                        : 'Got it — next letter',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
+        _buildQuizProgress(colors),
+        const SizedBox(height: 32),
+        Expanded(
+          child: Center(
+            child: SingleChildScrollView(child: _buildQuizQuestion(colors)),
           ),
-        const SizedBox(height: 12),
+        ),
+      ],
+    );
+  }
 
-        // Prev / Next row
+  Widget _buildQuizProgress(AppColors colors) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: _engine.quizPosition / _engine.quizTotal,
+            minHeight: 6,
+            backgroundColor: colors.border,
+            color: colors.primary,
+          ),
+        ),
+        const SizedBox(height: 8),
         Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _NavBtn(
-              label: '← Back',
-              enabled: _currentIndex > 0,
-              colors: colors,
-              onTap: _prev,
+            Text(
+              'Group ${_engine.currentGroupNumber} of ${_engine.groupCount}',
+              style: TextStyle(fontSize: 12, color: colors.textSecondary),
             ),
-            const Spacer(),
-            _NavBtn(
-              label: isLast ? 'Finish →' : 'Skip letter →',
-              enabled: true,
-              colors: colors,
-              onTap: _next,
-              subtle: true,
+            Text(
+              'Question ${_engine.quizPosition + 1} of ${_engine.quizTotal}',
+              style: TextStyle(fontSize: 12, color: colors.textSecondary),
             ),
           ],
         ),
       ],
     );
   }
-}
 
-// ---------------------------------------------------------------------------
-// Private nav button
-// ---------------------------------------------------------------------------
+  Widget _buildQuizQuestion(AppColors colors) {
+    final q = _engine.currentQuestion!;
 
-class _NavBtn extends StatelessWidget {
-  final String label;
-  final bool enabled;
-  final bool subtle;
-  final AppColors colors;
-  final VoidCallback onTap;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          q.prompt,
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: colors.textPrimary,
+            height: 1.3,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 32),
+        ...List.generate(q.options.length, (i) {
+          final isCorrectOption = i == q.correctIndex;
+          final isSelected = i == _selectedOption;
 
-  const _NavBtn({
-    required this.label,
-    required this.enabled,
-    required this.colors,
-    required this.onTap,
-    this.subtle = false,
-  });
+          var bg = colors.surface;
+          var border = colors.border;
+          var fg = colors.textPrimary;
 
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: !enabled
-              ? colors.border
-              : subtle
-                  ? colors.textSecondary
-                  : colors.accent,
+          if (_answerLocked) {
+            if (isCorrectOption) {
+              bg = colors.primary.withValues(alpha: 0.12);
+              border = colors.primary;
+              fg = colors.primary;
+            } else if (isSelected) {
+              bg = colors.accent.withValues(alpha: 0.12);
+              border = colors.accent;
+              fg = colors.accent;
+            }
+          }
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: GestureDetector(
+              onTap: () => _selectOption(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: bg,
+                  border: Border.all(
+                    color: border,
+                    width: (_answerLocked && (isCorrectOption || isSelected))
+                        ? 2
+                        : 1,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  q.options[i],
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: fg,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  // ── Group summary ────────────────────────────────────────────────────
+
+  Widget _buildGroupSummary(AppColors colors) {
+    final pct = (_engine.quizCorrect / _engine.quizTotal * 100).round();
+    final isLast = _engine.isLastGroup;
+
+    return Center(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration:
+                  BoxDecoration(shape: BoxShape.circle, color: colors.primary),
+              child: const Icon(Icons.check, color: Colors.white, size: 40),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Group ${_engine.currentGroupNumber} complete!',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: colors.primary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '$pct% — ${_engine.quizCorrect} of ${_engine.quizTotal} correct',
+              style: TextStyle(fontSize: 16, color: colors.textSecondary),
+            ),
+            const SizedBox(height: 40),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: isLast ? _finish : _continueToNextGroup,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape:
+                      RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 0,
+                ),
+                child: Text(
+                  isLast ? 'Finish & Start Reading' : 'Continue to next group →',
+                  style:
+                      const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

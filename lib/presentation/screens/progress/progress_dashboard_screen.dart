@@ -14,6 +14,7 @@ import '../../../domain/entities/word_entry.dart';
 import '../../../domain/usecases/track_parsing_progress_usecase.dart';
 import '../../../domain/usecases/track_verse_progress_usecase.dart';
 import '../../providers/language_provider.dart';
+import '../../widgets/review_entry_point.dart';
 
 // ---------------------------------------------------------------------------
 // Provider — loads all dashboard data in one async call so the screen
@@ -41,10 +42,12 @@ class _DashboardData {
   int get totalWordsSeen => allWords.length;
   int get knownWords => allWords.where((w) => w.known).length;
 
-  /// Mastered = masteryLevel >= 5 per word_entry.dart spec.
-  /// Note: VocabularyService currently clamps markKnown at level 3 —
-  /// this counter will show 0 until that cap is raised to 5. See
-  /// vocabulary_service.dart:markKnown for the pre-existing discrepancy.
+  /// Mastered = masteryLevel >= 5 per word_entry.dart spec. This
+  /// correctly reflects real data — VocabularyService.markKnown/
+  /// markUnknown clamp at 5, not 3 (confirmed directly against that
+  /// file this session). An earlier version of this comment described
+  /// a 3-vs-5 discrepancy that had already been fixed by the time this
+  /// comment was written; left uncorrected until now.
   int get masteredWords =>
       allWords.where((w) => w.masteryLevel >= 5).length;
 
@@ -149,6 +152,13 @@ class _DashboardBody extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       children: [
+        // ── Review (spaced repetition) ───────────────────────────────────
+        // Placed first — it's the most actionable item on this screen,
+        // unlike the stats below which are purely informational.
+        _SectionHeader(label: 'Review', colors: colors),
+        const ReviewDueCard(),
+        const SizedBox(height: 24),
+
         // ── Readability (Phase 11) ───────────────────────────────────────
         _SectionHeader(label: 'Readability', colors: colors),
         _ReadabilityCard(colors: colors),

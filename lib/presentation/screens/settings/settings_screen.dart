@@ -151,7 +151,14 @@ class _DataSectionState extends ConsumerState<_DataSection> {
   bool _backingUp = false;
   bool _restoring = false;
 
-  Future<void> _backUp() async {
+  /// [buttonContext] is the "Back Up Data" tile's OWN context (see the
+  /// Builder wrapping it below) — needed to compute sharePositionOrigin.
+  /// This is the same fix already applied to vocabulary_screen.dart's
+  /// CSV export button; this call site was missed the first time,
+  /// which is exactly the PlatformException a real device test caught:
+  /// "sharePositionOrigin: argument must be set... must be non-zero".
+  /// See ExportService.exportAndShare's doc for the full explanation.
+  Future<void> _backUp(BuildContext buttonContext) async {
     if (_backingUp) return;
     setState(() => _backingUp = true);
     try {
@@ -160,12 +167,24 @@ class _DataSectionState extends ConsumerState<_DataSection> {
       final jsonStr = const JsonEncoder.withIndent('  ').convert(backup);
       final timestamp = DateTime.now().toIso8601String().split('T').first;
 
+      final box = buttonContext.findRenderObject() as RenderBox?;
+      final origin =
+          box != null ? (box.localToGlobal(Offset.zero) & box.size) : null;
+
       await const ExportService().exportAndShare(
         content: jsonStr,
         fileName: 'babble_tower_backup_$timestamp.json',
         subject: 'Babble Tower Backup',
+        sharePositionOrigin: origin,
       );
-    } catch (_) {
+    } catch (e, st) {
+      // Logged, not just shown as a generic snackbar — a caught error
+      // that's never surfaced anywhere is undebuggable. See this
+      // session's own investigation: this exact catch-all previously
+      // hid a platform-specific failure (path_provider's
+      // getTemporaryDirectory has no real implementation on Flutter
+      // Web) behind an uninformative "please try again."
+      debugPrint('[SettingsScreen] Backup failed: $e\n$st');
       _showSnack('Backup failed. Please try again.');
     } finally {
       if (mounted) setState(() => _backingUp = false);
@@ -207,7 +226,8 @@ class _DataSectionState extends ConsumerState<_DataSection> {
       _showSnack('Restore complete. Please restart the app.');
     } on FormatException catch (e) {
       _showSnack(e.message);
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[SettingsScreen] Restore failed: $e\n$st');
       _showSnack('Restore failed. Please check the file and try again.');
     } finally {
       if (mounted) setState(() => _restoring = false);
@@ -225,13 +245,17 @@ class _DataSectionState extends ConsumerState<_DataSection> {
     final colors = context.colors;
     return Column(
       children: [
-        _ActionTile(
-          title: 'Back Up Data',
-          subtitle: 'Save your progress and vocabulary to a file',
-          icon: Icons.backup_outlined,
-          busy: _backingUp,
-          colors: colors,
-          onTap: _backUp,
+        // Wrapped in a Builder so the tile has its OWN context to
+        // compute sharePositionOrigin from — see _backUp's doc.
+        Builder(
+          builder: (tileContext) => _ActionTile(
+            title: 'Back Up Data',
+            subtitle: 'Save your progress and vocabulary to a file',
+            icon: Icons.backup_outlined,
+            busy: _backingUp,
+            colors: colors,
+            onTap: () => _backUp(tileContext),
+          ),
         ),
         _ActionTile(
           title: 'Restore Data',

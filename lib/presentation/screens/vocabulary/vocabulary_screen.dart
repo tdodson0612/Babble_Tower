@@ -8,6 +8,7 @@ import '../../../domain/entities/word_entry.dart';
 import '../../../domain/usecases/export_vocabulary_usecase.dart';
 import '../../providers/vocabulary_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/review_entry_point.dart';
 
 class VocabularyScreen extends ConsumerStatefulWidget {
   const VocabularyScreen({super.key});
@@ -111,6 +112,10 @@ class _VocabularyScreenState extends ConsumerState<VocabularyScreen>
           ),
         ),
         actions: [
+          // Spaced-repetition review entry point. Self-contained widget
+          // (watches its own due-count provider) — see
+          // review_entry_point.dart.
+          const ReviewIconButton(),
           // Wrapped in a Builder so the button has its OWN context to
           // compute sharePositionOrigin from — the AppBar/Scaffold
           // context above isn't scoped to this specific button's

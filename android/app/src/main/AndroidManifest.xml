@@ -1,55 +1,68 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Notification permissions (streak reminder feature) -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
-    <application
-        android:label="babble_tower"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:taskAffinity=""
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
+<application
+android:label="babble_tower"
+android:name="${applicationName}"
+android:icon="@mipmap/ic_launcher">
+<activity
+android:name=".MainActivity"
+android:exported="true"
+android:launchMode="singleTop"
+android:taskAffinity=""
+android:theme="@style/LaunchTheme"
+android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+android:hardwareAccelerated="true"
+android:windowSoftInputMode="adjustResize">
+<meta-data
+android:name="io.flutter.embedding.android.NormalTheme"
+android:resource="@style/NormalTheme"
+/>
+<intent-filter>
+<action android:name="android.intent.action.MAIN"/>
+<category android:name="android.intent.category.LAUNCHER"/>
+</intent-filter>
+</activity>
+<meta-data
+android:name="flutterEmbedding"
+android:value="2" />
 
-        <!-- Streak reminder notifications: lets scheduled reminders survive
+<!-- Streak reminder notifications: lets scheduled reminders survive
              a device restart. Without this receiver, notifications
              scheduled via flutter_local_notifications are lost the next
-             time the phone reboots until the app is reopened. -->
-        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-            </intent-filter>
-        </receiver>
-        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
-    </application>
+             time the phone reboots until the app is reopened.
 
-    <queries>
-        <!-- Required for Flutter text processing plugin -->
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
-        </intent>
-        <!-- Required for flutter_tts on Android 11+ (API 30+) -->
-        <intent>
-            <action android:name="android.intent.action.TTS_SERVICE"/>
-        </intent>
-    </queries>
+             android:exported="false" added — since Android 12 (API 31),
+             any component with an <intent-filter> MUST explicitly
+             declare android:exported or the build fails outright. false
+             is correct/safe here: BOOT_COMPLETED is a protected system
+             broadcast (only the OS can send it, no other app can spoof
+             it), so this receiver never needs to accept intents from
+             outside this app. Found via direct manifest review this
+             session — untested against a real Android build so far,
+             so worth confirming with an actual `flutter run` on an
+             Android target/emulator once available. -->
+<receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+android:exported="false">
+<intent-filter>
+<action android:name="android.intent.action.BOOT_COMPLETED"/>
+</intent-filter>
+</receiver>
+<receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+android:exported="false"/>
+</application>
+
+<queries>
+<!-- Required for Flutter text processing plugin -->
+<intent>
+<action android:name="android.intent.action.PROCESS_TEXT"/>
+<data android:mimeType="text/plain"/>
+</intent>
+<!-- Required for flutter_tts on Android 11+ (API 30+) -->
+<intent>
+<action android:name="android.intent.action.TTS_SERVICE"/>
+</intent>
+</queries>
 </manifest>

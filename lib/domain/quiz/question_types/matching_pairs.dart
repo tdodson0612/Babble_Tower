@@ -6,9 +6,16 @@ import '../../../core/constants/app_colors.dart';
 import '../quiz_models.dart';
 import '../quiz_question.dart';
 
-/// Shows 4 Greek words (target + 3 distractors) and their English meanings
+/// Shows 4 Greek words (target + 3 companions) and their English meanings
 /// in two shuffled columns. User taps one Greek word then its matching
 /// English meaning to form a pair.
+///
+/// The 3 companion words are chosen by QuizEngine, not this class — the
+/// engine needs to know exactly which 3 words end up covered by this
+/// board so it can mark ALL 4 as asked (not just the nominal target),
+/// so none of them get queued again separately elsewhere. See
+/// QuizEngine._buildQueue/_pickMatchingPairsCompanions for that logic.
+/// This class only presents and scores; it doesn't decide who's in it.
 ///
 /// Fix #5: user must complete ALL 4 pairs before the question resolves.
 /// The question is scored correct if the target word was matched to its
@@ -17,26 +24,13 @@ import '../quiz_question.dart';
 class MatchingPairsQuestion implements QuizQuestion {
   MatchingPairsQuestion({
     required QuizWord target,
-    required List<QuizWord> distractorPool,
+    required List<QuizWord> otherWords,
     required Random random,
   })  : _target = target,
-        _pairWords = _buildPairWords(target, distractorPool, random);
+        _pairWords = [target, ...otherWords];
 
   final QuizWord _target;
   final List<QuizWord> _pairWords;
-
-  static List<QuizWord> _buildPairWords(
-    QuizWord target,
-    List<QuizWord> pool,
-    Random random,
-  ) {
-    final candidates = pool
-        .where((w) => w.translation.isNotEmpty && w.word.isNotEmpty)
-        .toList()
-      ..shuffle(random);
-    final distractors = candidates.take(3).toList();
-    return [target, ...distractors];
-  }
 
   @override
   QuizWord get targetWord => _target;
