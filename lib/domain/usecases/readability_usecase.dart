@@ -1,7 +1,6 @@
 // lib/domain/usecases/readability_usecase.dart
 
 import '../../data/services/vocabulary_service.dart';
-import '../../domain/entities/word_entry.dart';
 import '../../core/constants/supported_languages.dart';
 
 /// Readability categories — how much of a verse a user can read

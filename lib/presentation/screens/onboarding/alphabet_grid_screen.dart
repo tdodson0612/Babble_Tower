@@ -21,6 +21,7 @@ class AlphabetGridScreen extends ConsumerWidget {
 
   const AlphabetGridScreen({super.key, this.fromSettings = false});
 
+  // ignore: unused_field
   static const AlphabetData _data = greekAlphabetData;
 
   @override
@@ -221,6 +222,7 @@ class _LetterDetailSheet extends StatelessWidget {
   final int index;
   final int total;
 
+  // ignore: unused_field
   static const AlphabetData _data = greekAlphabetData;
 
   const _LetterDetailSheet({

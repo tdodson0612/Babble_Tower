@@ -17,6 +17,16 @@ class WordEntry {
   int masteryLevel;
   DateTime lastReviewed;
 
+  /// Cumulative count of wrong answers for this word, across quizzes,
+  /// review sessions, and the manual "✗ Not yet" tap — every path that
+  /// counts as "wrong" funnels through VocabularyService.markUnknown(),
+  /// which is the single place this is incremented. Never decremented.
+  /// Distinct from masteryLevel: masteryLevel can be 0 either because a
+  /// word was genuinely missed repeatedly OR because it's brand new and
+  /// has simply never been quizzed — timesWrong disambiguates those two
+  /// cases for the "Toughest words" view.
+  int timesWrong;
+
   WordEntry({
     required this.word,
     required this.languagePairKey,
@@ -25,6 +35,7 @@ class WordEntry {
     this.lemma = '',
     this.known = false,
     this.masteryLevel = 0,
+    this.timesWrong = 0,
     required this.lastReviewed,
   });
 
@@ -39,6 +50,7 @@ class WordEntry {
     String? lemma,
     bool? known,
     int? masteryLevel,
+    int? timesWrong,
     DateTime? lastReviewed,
   }) {
     return WordEntry(
@@ -49,6 +61,7 @@ class WordEntry {
       lemma: lemma ?? this.lemma,
       known: known ?? this.known,
       masteryLevel: masteryLevel ?? this.masteryLevel,
+      timesWrong: timesWrong ?? this.timesWrong,
       lastReviewed: lastReviewed ?? this.lastReviewed,
     );
   }

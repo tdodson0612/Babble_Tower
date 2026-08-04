@@ -1,6 +1,6 @@
 name: babble_tower
 description: A language learning app teaching English speakers to read Koine Greek through the four Gospels.
-version: 1.0.0+7
+version: 1.0.0+14
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -21,36 +21,61 @@ dependencies:
   path_provider: ^2.1.1
   flutter_tts: ^4.2.5
 
-  # Audio — quiz correct/incorrect sound effects (Phase: sound effects)
+  # Audio
   audioplayers: ^6.0.0
 
-  # Vocabulary CSV export — native share sheet
+  # Sharing
   share_plus: ^12.0.2
 
-  # Backup restore — native file picker
+  # File picker
   file_picker: ^10.3.9
 
-  # Streak reminder notifications
+  # Notifications
   flutter_local_notifications: ^20.1.0
   timezone: ^0.10.1
   flutter_timezone: ^3.0.1
 
+  # URL launcher
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.4
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
+
   assets:
     - assets/bible/el/
-    - assets/dictionaries/
+    - assets/bible/en_kjv/
+    - assets/dictionaries/en_el.json
+    - assets/dictionaries/el_en.json
     - assets/sounds/
     - assets/morphology/
+    - assets/word_families/
 
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon/app_icon.png"
   remove_alpha_ios: true
+
+flutter_native_splash:
+  color: "#FAF1D5"
+  image: assets/splash/splash_logo.png
+
+  color_dark: "#FAF1D5"
+  image_dark: assets/splash/splash_logo.png
+
+  android_12:
+    color: "#FAF1D5"
+    image: assets/splash/splash_logo.png
+    color_dark: "#FAF1D5"
+    image_dark: assets/splash/splash_logo.png
+
+  android: true
+  ios: true
+  web: false

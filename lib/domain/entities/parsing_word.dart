@@ -68,8 +68,11 @@ class ParsingWord {
   String? get _voice => _charAt(2);
   String? get _mood => _charAt(3);
   String? get _grammaticalCase => _charAt(4);
+  // ignore: unused_element
   String? get _number => _charAt(5);
+  // ignore: unused_element
   String? get _gender => _charAt(6);
+  // ignore: unused_element
   String? get _degree => _charAt(7);
 
   String? _charAt(int i) {

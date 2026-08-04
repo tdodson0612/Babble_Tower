@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
-import '../../../core/constants/supported_languages.dart';
 import '../../../data/models/parsing_progress_model.dart';
 import '../../../data/models/verse_progress_model.dart';
 import '../../../data/services/vocabulary_service.dart';
@@ -75,8 +74,8 @@ final _dashboardProvider =
     FutureProvider.autoDispose<_DashboardData>((ref) async {
   final pairKey = ref.watch(languageProvider).pairKey;
   final vocabService = VocabularyService();
-  final verseUseCase = const TrackVerseProgressUseCase();
-  final parsingUseCase = const TrackParsingProgressUseCase();
+  const verseUseCase = TrackVerseProgressUseCase();
+  const parsingUseCase = TrackParsingProgressUseCase();
 
   final allWords = await vocabService.getAll(pairKey);
   final verseProgress = await verseUseCase.loadAll(pairKey);
@@ -162,6 +161,13 @@ class _DashboardBody extends StatelessWidget {
         // ── Readability (Phase 11) ───────────────────────────────────────
         _SectionHeader(label: 'Readability', colors: colors),
         _ReadabilityCard(colors: colors),
+        const SizedBox(height: 12),
+
+        // ── Grammar reference (handoff doc's Grammar cluster, item 6) ────
+        // Standalone, ungated, browsable — same "linked card" pattern as
+        // the Readability card just above, since both are self-contained
+        // reference/summary destinations rather than inline stats.
+        _GrammarReferenceCard(colors: colors),
         const SizedBox(height: 24),
 
         // ── Streak (placeholder) ─────────────────────────────────────────
@@ -206,6 +212,8 @@ class _DashboardBody extends StatelessWidget {
           value: data.knownFraction,
           colors: colors,
         ),
+        const SizedBox(height: 12),
+        _ToughestWordsCard(colors: colors),
         const SizedBox(height: 24),
 
         // ── Verses ───────────────────────────────────────────────────────
@@ -677,6 +685,135 @@ class _ReadabilityCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       color:    colors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: colors.border),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Toughest Words summary card — links to the standalone ToughestWordsScreen.
+// Same "linked card" pattern as _ReadabilityCard / _GrammarReferenceCard.
+// ---------------------------------------------------------------------------
+
+class _ToughestWordsCard extends StatelessWidget {
+  final AppColors colors;
+  const _ToughestWordsCard({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.of(context).pushNamed('/toughest_words'),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: colors.highlight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.emoji_events_outlined,
+                  size: 20, color: colors.primary),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Toughest Words',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    'The words you\'ve missed the most',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: colors.border),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Grammar reference summary card — links to the standalone, ungated
+// GrammarReferenceScreen. Same "linked card" pattern as _ReadabilityCard
+// above (project handoff doc's Grammar cluster, item 6).
+// ---------------------------------------------------------------------------
+
+class _GrammarReferenceCard extends StatelessWidget {
+  final AppColors colors;
+  const _GrammarReferenceCard({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.of(context).pushNamed('/grammar_reference'),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: colors.highlight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.menu_book_rounded,
+                  size: 20, color: colors.primary),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Grammar Reference',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    'Browse why Greek word endings change',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colors.textSecondary,
                     ),
                   ),
                 ],

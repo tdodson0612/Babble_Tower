@@ -2,15 +2,23 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/kjv_service.dart';
+import '../../../data/services/morphology_service.dart';
 import '../../../data/services/pronunciation_service.dart';
+import '../../../domain/entities/verse.dart';
+import '../../../domain/grammar/grammar_lesson_engine.dart';
+import '../../../domain/usecases/track_grammar_lesson_progress_usecase.dart';
 import '../../../domain/usecases/track_progress_usecase.dart';
 import '../../../domain/usecases/track_verse_progress_usecase.dart';
 import '../../providers/bible_provider.dart';
 import '../../providers/language_provider.dart';
 import '../../providers/vocabulary_provider.dart';
 import '../../widgets/verse_block_view.dart';
+import 'grammar_lesson_screen.dart';
 import 'verse_quiz_screen.dart';
+import 'word_list_screen.dart';
 
 class ReaderScreen extends ConsumerStatefulWidget {
   const ReaderScreen({super.key});
@@ -21,6 +29,8 @@ class ReaderScreen extends ConsumerStatefulWidget {
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   final _progress = const TrackProgressUseCase();
+  final _morphologyService = MorphologyService();
+  final _grammarLessonProgress = const TrackGrammarLessonProgressUseCase();
   int? _lastLoadedBlockIndex;
 
   /// Which verse indices have passed their quiz this session, allowing
@@ -46,6 +56,47 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (_lastLoadedBlockIndex == bibleState.currentBlockIndex) return;
     _lastLoadedBlockIndex = bibleState.currentBlockIndex;
     ref.read(vocabularyProvider.notifier).loadForBlock(block.words);
+    _maybeShowWordList(bibleState, block);
+  }
+
+  // ── Word List page ───────────────────────────────────────────────────────
+  //
+  // Shown once per genuinely-new block, before its verse content — the
+  // forward-progress path only. Reuses the same inReview signal
+  // _ReaderBody already computes (currentBlockIndex < highestBlock)
+  // rather than inventing a separate "have I seen this before" tracker:
+  // showing a vocabulary pre-teach page again on the 10th re-read of an
+  // already-mastered block is pure friction with no pedagogical benefit.
+  // Piggybacks on _loadVocabForCurrentBlock's existing
+  // _lastLoadedBlockIndex guard, so this only runs once per block change
+  // (not on every rebuild) — and since revisiting an earlier block in
+  // review mode always has inReview == true, it naturally no-ops there
+  // too without any extra bookkeeping.
+
+  Future<void> _maybeShowWordList(BibleState bibleState, dynamic block) async {
+    final langState = ref.read(languageProvider);
+    final blockIndex = bibleState.currentBlockIndex;
+
+    final highest = await _progress.highestBlock(pairKey: langState.pairKey);
+    final inReview = blockIndex < highest;
+    if (inReview) return;
+
+    if (!mounted) return;
+    // Guard against the user navigating again while we were awaiting
+    // highestBlock() — only show for the block this call was for.
+    if (ref.read(bibleProvider).currentBlockIndex != blockIndex) return;
+
+    // Same combined-verse-text construction _startQuiz() and the
+    // "Listen to this verse" button already use — reused, not
+    // recomputed differently here.
+    final verseText =
+        (block.verses as List).map((v) => v.text as String).join(' ');
+    if (verseText.trim().isEmpty) return;
+
+    await Navigator.of(context).pushNamed(
+      '/word_list',
+      arguments: WordListArgs(verseText: verseText),
+    );
   }
 
   // ── Position saving ───────────────────────────────────────────────────────
@@ -89,6 +140,59 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final chapter = bibleState.selectedChapter ?? 1;
     final verse   = block.verses.isNotEmpty ? block.verses.first.number : 1;
     final label   = '$book $chapter:$verse';
+
+    // ── Grammar lesson interstitial ─────────────────────────────────────
+    // Auto-launches before the quiz, teaching only the grammar values —
+    // across all five GrammarCategory dimensions (case, person, tense,
+    // voice, mood) — actually present among this verse's words that are
+    // "due" (never taught, or 7+ days since last taught — see
+    // TrackGrammarLessonProgressUseCase). A single verb can be due on
+    // several categories at once (e.g. person AND tense independently),
+    // so this gathers (word, category) pairs, not bare words. Skipped
+    // entirely — straight to the quiz, exactly as before — when nothing
+    // is due. Uses the SAME single verseNumber VerseQuizScreen already
+    // fetches morphology for (see that screen's _initQuiz) — a
+    // pre-existing simplification for multi-verse blocks, kept
+    // consistent here rather than "fixed" as a side effect of this
+    // feature.
+    final morphology =
+        await _morphologyService.wordsForVerse(book, chapter, verse);
+
+    // First occurrence of each (category, code) combined key, in verse
+    // order.
+    final firstItemForKey = <String, DueGrammarItem>{};
+    for (final w in morphology) {
+      for (final category in w.availableCategories) {
+        final code = w.codeFor(category);
+        if (code == null) continue;
+        final key = grammarKey(category, code);
+        firstItemForKey.putIfAbsent(
+          key,
+          () => DueGrammarItem(word: w, category: category),
+        );
+      }
+    }
+
+    if (firstItemForKey.isNotEmpty) {
+      final due = await _grammarLessonProgress.dueKeys(
+        langState.pairKey,
+        firstItemForKey.keys,
+      );
+      if (due.isNotEmpty) {
+        final dueItems = due.map((k) => firstItemForKey[k]!).toList();
+        if (mounted) {
+          await Navigator.of(context).pushNamed(
+            '/grammar_lesson',
+            arguments: GrammarLessonArgs(
+              items: dueItems,
+              pairKey: langState.pairKey,
+            ),
+          );
+        }
+      }
+    }
+
+    if (!mounted) return;
 
     final passed = await Navigator.of(context).pushNamed(
       '/verse_quiz',
@@ -250,6 +354,23 @@ class _ReaderBody extends StatelessWidget {
         final verseText =
             (block.verses as List).map((v) => v.text as String).join(' ');
 
+        // NIV link-out URL (handoff doc's to-do list — external
+        // link-out only, NIV text is never embedded directly; see the
+        // handoff's licensing note). Range-aware: a block with several
+        // verses links to the correct verse range, e.g. "Mark 1:1-3".
+        final verses = block.verses as List;
+        final firstVerseNum =
+            verses.isNotEmpty ? verses.first.number as int : 1;
+        final lastVerseNum =
+            verses.isNotEmpty ? verses.last.number as int : firstVerseNum;
+        final verseRef = firstVerseNum == lastVerseNum
+            ? '$firstVerseNum'
+            : '$firstVerseNum-$lastVerseNum';
+        final nivUrl = 'https://www.biblegateway.com/passage/?search='
+            '${Uri.encodeComponent('${bibleState.selectedBook ?? ''} '
+                '${bibleState.selectedChapter ?? 1}:$verseRef')}'
+            '&version=NIV';
+
         return Column(
           children: [
             if (inReview) const _ReviewBanner(),
@@ -281,6 +402,11 @@ class _ReaderBody extends StatelessWidget {
               canAdvance:  canAdvance,
               inReview:    inReview,
               verseText:   verseText,
+              nivUrl:      nivUrl,
+              kjvBook:        bibleState.selectedBook ?? '',
+              kjvChapter:     bibleState.selectedChapter ?? 1,
+              kjvFirstVerse:  firstVerseNum,
+              kjvLastVerse:   lastVerseNum,
               onPrev:      onPrev,
               onNext:      isLast ? null : onNext,
               onStartQuiz: onStartQuiz,
@@ -558,6 +684,11 @@ class _BottomNav extends StatelessWidget {
   final bool canAdvance;
   final bool inReview;
   final String verseText;
+  final String nivUrl;
+  final String kjvBook;
+  final int kjvChapter;
+  final int kjvFirstVerse;
+  final int kjvLastVerse;
   final VoidCallback onPrev;
   final Future<void> Function()? onNext;
   final Future<void> Function() onStartQuiz;
@@ -568,6 +699,11 @@ class _BottomNav extends StatelessWidget {
     required this.canAdvance,
     required this.inReview,
     required this.verseText,
+    required this.nivUrl,
+    required this.kjvBook,
+    required this.kjvChapter,
+    required this.kjvFirstVerse,
+    required this.kjvLastVerse,
     required this.onPrev,
     required this.onNext,
     required this.onStartQuiz,
@@ -577,74 +713,371 @@ class _BottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
 
+    // Wrapped in SafeArea(top: false) — Android's 3-button gesture
+    // navigation bar was overlapping the Prev/Next row (system inset
+    // wasn't accounted for). The fixed 24px bottom padding below still
+    // applies on top of whatever extra inset SafeArea adds, so devices
+    // with no gesture bar (fixed nav buttons, most iOS devices) see no
+    // visual change at all — this only adds space where the OS reports
+    // a real bottom inset.
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          border: Border(top: BorderSide(color: colors.border)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Listen button — always visible, never gated by quiz-pass
+            // state. Sits above the quiz button per the handoff spec.
+            _VerseAudioButton(verseText: verseText),
+            const SizedBox(height: 6),
+
+            // Translation reference row — NIV links out (Biblica's
+            // licensing rules out embedding it directly), KJV embeds
+            // real text (public domain — see kjv_service.dart's doc).
+            // Small/subtle, side by side, so neither competes visually
+            // with the Listen and quiz buttons above/below.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _NivLinkButton(url: nivUrl),
+                const SizedBox(width: 4),
+                _KjvButton(
+                  book: kjvBook,
+                  chapter: kjvChapter,
+                  firstVerse: kjvFirstVerse,
+                  lastVerse: kjvLastVerse,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Quiz button — always offered when not in review; label
+            // changes based on whether this verse's quiz has been passed.
+            if (!inReview)
+              SizedBox(
+                width: double.infinity,
+                child: _NavBtn(
+                  label: canAdvance
+                      ? 'Practice this verse again'
+                      : 'Take the quiz to continue',
+                  icon: canAdvance
+                      ? Icons.replay_outlined
+                      : Icons.school_outlined,
+                  color: canAdvance ? colors.accent : colors.primary,
+                  onPressed: onStartQuiz,
+                ),
+              ),
+            if (!inReview) const SizedBox(height: 10),
+
+            // Prev / Next. Prev is never gated — you can always go back
+            // and re-read a previous verse. Next requires canAdvance.
+            Row(
+              children: [
+                _NavBtn(
+                  label:     '← Prev',
+                  icon:      Icons.chevron_left,
+                  color:     colors.textSecondary,
+                  onPressed: isFirst ? null : onPrev,
+                  compact:   true,
+                ),
+                const Spacer(),
+                if (!isLast)
+                  _NavBtn(
+                    label: inReview
+                        ? 'Next verse →'
+                        : (canAdvance ? 'Next verse →' : 'Quiz first →'),
+                    icon:      Icons.chevron_right,
+                    color:     (inReview || canAdvance)
+                        ? colors.primary
+                        : colors.border,
+                    onPressed: (inReview || canAdvance) ? onNext : null,
+                    compact:   true,
+                  )
+                else
+                  Text(
+                    'Chapter complete ✓',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: colors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── NIV link-out button ───────────────────────────────────────────────────
+// Opens BibleGateway in the system browser — never embeds NIV text
+// directly (Biblica's licensing has a broad AI/ML clause and won't
+// license apps still in development anyway — see handoff doc's to-do
+// list). Silently no-ops if the URL can't be launched (no browser
+// available, malformed URL, etc.) rather than surfacing an error for
+// what's a "nice to have" reference link, not core functionality.
+
+class _NivLinkButton extends StatelessWidget {
+  final String url;
+  const _NivLinkButton({required this.url});
+
+  Future<void> _open() async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return TextButton.icon(
+      onPressed: _open,
+      icon: Icon(Icons.open_in_new_rounded, size: 14, color: colors.accent),
+      label: Text(
+        'See NIV translation',
+        style: TextStyle(
+          fontSize: 13,
+          color: colors.accent,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+}
+
+// ── KJV embedded-text button ────────────────────────────────────────────
+// Opens a bottom sheet showing the real KJV English text for this
+// block's verse range — public domain, so unlike NIV it's embedded
+// directly rather than linked out. See kjv_service.dart's doc for the
+// full licensing rationale and data source.
+
+class _KjvButton extends StatelessWidget {
+  final String book;
+  final int chapter;
+  final int firstVerse;
+  final int lastVerse;
+
+  const _KjvButton({
+    required this.book,
+    required this.chapter,
+    required this.firstVerse,
+    required this.lastVerse,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return TextButton.icon(
+      onPressed: () => _showSheet(context),
+      icon: Icon(Icons.menu_book_outlined, size: 14, color: colors.accent),
+      label: Text(
+        'See KJV translation',
+        style: TextStyle(
+          fontSize: 13,
+          color: colors.accent,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+
+  void _showSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _KjvSheet(
+        book: book,
+        chapter: chapter,
+        firstVerse: firstVerse,
+        lastVerse: lastVerse,
+      ),
+    );
+  }
+}
+
+class _KjvSheet extends StatefulWidget {
+  final String book;
+  final int chapter;
+  final int firstVerse;
+  final int lastVerse;
+
+  const _KjvSheet({
+    required this.book,
+    required this.chapter,
+    required this.firstVerse,
+    required this.lastVerse,
+  });
+
+  @override
+  State<_KjvSheet> createState() => _KjvSheetState();
+}
+
+class _KjvSheetState extends State<_KjvSheet> {
+  static final _service = KjvService();
+  late final Future<List<Verse>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _service.getVerseRange(
+      widget.book,
+      widget.chapter,
+      widget.firstVerse,
+      widget.lastVerse,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final verseRef = widget.firstVerse == widget.lastVerse
+        ? '${widget.firstVerse}'
+        : '${widget.firstVerse}-${widget.lastVerse}';
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.7,
+      ),
       decoration: BoxDecoration(
         color: colors.surface,
-        border: Border(top: BorderSide(color: colors.border)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Listen button — always visible, never gated by quiz-pass
-          // state. Sits above the quiz button per the handoff spec.
-          _VerseAudioButton(verseText: verseText),
-          const SizedBox(height: 10),
-
-          // Quiz button — always offered when not in review; label
-          // changes based on whether this verse's quiz has been passed.
-          if (!inReview)
-            SizedBox(
-              width: double.infinity,
-              child: _NavBtn(
-                label: canAdvance
-                    ? 'Practice this verse again'
-                    : 'Take the quiz to continue',
-                icon: canAdvance
-                    ? Icons.replay_outlined
-                    : Icons.school_outlined,
-                color: canAdvance ? colors.accent : colors.primary,
-                onPressed: onStartQuiz,
-              ),
-            ),
-          if (!inReview) const SizedBox(height: 10),
-
-          // Prev / Next. Prev is never gated — you can always go back
-          // and re-read a previous verse. Next requires canAdvance.
-          Row(
-            children: [
-              _NavBtn(
-                label:     '← Prev',
-                icon:      Icons.chevron_left,
-                color:     colors.textSecondary,
-                onPressed: isFirst ? null : onPrev,
-                compact:   true,
-              ),
-              const Spacer(),
-              if (!isLast)
-                _NavBtn(
-                  label: inReview
-                      ? 'Next verse →'
-                      : (canAdvance ? 'Next verse →' : 'Quiz first →'),
-                  icon:      Icons.chevron_right,
-                  color:     (inReview || canAdvance)
-                      ? colors.primary
-                      : colors.border,
-                  onPressed: (inReview || canAdvance) ? onNext : null,
-                  compact:   true,
-                )
-              else
-                Text(
-                  'Chapter complete ✓',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: colors.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-            ],
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 24,
+            offset: const Offset(0, -4),
           ),
         ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: colors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${widget.book} ${widget.chapter}:$verseRef',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colors.highlight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'KJV',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: colors.accent,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Flexible(
+              child: SingleChildScrollView(
+                child: FutureBuilder<List<Verse>>(
+                  future: _future,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                              color: colors.primary),
+                        ),
+                      );
+                    }
+                    final verses = snapshot.data ?? const <Verse>[];
+                    if (verses.isEmpty) {
+                      return Text(
+                        'KJV text not available for this passage.',
+                        style: TextStyle(
+                          color: colors.textSecondary,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: verses.map((v) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: RichText(
+                            text: TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: '${v.number} ',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: colors.accent,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: v.text,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    height: 1.5,
+                                    color: colors.textPrimary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

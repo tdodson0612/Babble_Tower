@@ -6,6 +6,7 @@ import 'core/constants/app_colors.dart';
 import 'data/services/notification_service.dart';
 import 'presentation/providers/settings_provider.dart';
 import 'presentation/providers/user_profile_provider.dart';
+import 'presentation/providers/tutorial_provider.dart';
 import 'presentation/screens/progress/readability_screen.dart';
 import 'presentation/screens/progress/progress_dashboard_screen.dart';
 import 'presentation/screens/onboarding/alphabet_grid_screen.dart';
@@ -13,9 +14,14 @@ import 'presentation/screens/onboarding/alphabet_screen.dart';
 import 'presentation/screens/home/home_screen.dart';
 import 'presentation/screens/reader/reader_screen.dart';
 import 'presentation/screens/reader/verse_quiz_screen.dart';
+import 'presentation/screens/reader/word_list_screen.dart';
+import 'presentation/screens/reader/grammar_lesson_screen.dart';
+import 'presentation/screens/reference/grammar_reference_screen.dart';
 import 'presentation/screens/review/review_session_screen.dart';
+import 'presentation/screens/vocabulary/toughest_words_screen.dart';
 import 'presentation/screens/vocabulary/vocabulary_screen.dart';
 import 'presentation/screens/settings/settings_screen.dart';
+import 'presentation/widgets/tutorial/tutorial_overlay.dart';
 
 class BabbleTowerApp extends ConsumerWidget {
   const BabbleTowerApp({super.key});
@@ -27,6 +33,7 @@ class BabbleTowerApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Babble Tower',
       debugShowCheckedModeBanner: false,
+      navigatorKey: tutorialNavigatorKey,
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         scaffoldBackgroundColor: AppColors.light.background,
@@ -81,6 +88,41 @@ class BabbleTowerApp extends ConsumerWidget {
               builder: (_) => const VerseQuizScreen(),
               settings: settings,
             );
+          case '/word_list':
+            // Word List page (project handoff doc, "Word List Page"
+            // section) — shown once per genuinely-new block, before its
+            // verse content, on the forward-progress path only. NOT
+            // registering this route was the actual cause of the
+            // "alphabet grid pops up on every screen" bug: an unmatched
+            // route name silently falls through to the `default` case
+            // below, which is _RootRedirect → AlphabetGridScreen.
+            return MaterialPageRoute(
+              builder: (_) => WordListScreen(
+                args: settings.arguments as WordListArgs,
+              ),
+              settings: settings,
+            );
+          case '/grammar_lesson':
+            // Grammar lesson interstitial, auto-launched from
+            // reader_screen.dart's "Take the quiz" button — covers all
+            // five GrammarCategory dimensions (case, person, tense,
+            // voice, mood). See project handoff doc's Grammar cluster,
+            // items 3 and 4. Generalized from the original Cases-only
+            // pilot (formerly '/cases_lesson').
+            return MaterialPageRoute(
+              builder: (_) => GrammarLessonScreen(
+                args: settings.arguments as GrammarLessonArgs,
+              ),
+              settings: settings,
+            );
+          case '/grammar_reference':
+            // Standalone, ungated Grammar reference — project handoff
+            // doc's Grammar cluster, item 6. Takes no arguments, unlike
+            // /grammar_lesson: it browses ALL values in
+            // grammarExplanations, not a due-filtered subset for one verse.
+            return MaterialPageRoute(
+              builder: (_) => const GrammarReferenceScreen(),
+            );
           case '/review':
             // Spaced-repetition review session. Takes no arguments —
             // unlike /verse_quiz, it computes its own due-word list
@@ -88,6 +130,12 @@ class BabbleTowerApp extends ConsumerWidget {
             // than depending on a caller to pass verse-scoped words.
             return MaterialPageRoute(
               builder: (_) => const ReviewSessionScreen(),
+            );
+          case '/toughest_words':
+            // "Toughest words" view — sorted by WordEntry.timesWrong
+            // descending. See project handoff doc's "still open" list.
+            return MaterialPageRoute(
+              builder: (_) => const ToughestWordsScreen(),
             );
           case '/vocabulary':
             return MaterialPageRoute(
@@ -111,6 +159,21 @@ class BabbleTowerApp extends ConsumerWidget {
             );
         }
       },
+      // Mounts TutorialOverlay ABOVE whatever screen is currently
+      // showing, regardless of route — this is what lets a tutorial
+      // script spotlight a widget on any screen without that screen
+      // needing its own copy of the overlay logic. `child` is the
+      // actual routed screen; TutorialOverlay itself renders nothing
+      // (SizedBox.shrink) whenever no tutorial is active, so this has
+      // zero visual/behavioral effect outside an active tutorial.
+      builder: (context, child) {
+        return Stack(
+          children: [
+            if (child != null) child,
+            const TutorialOverlay(),
+          ],
+        );
+      },
     );
   }
 }
@@ -128,6 +191,11 @@ class BabbleTowerApp extends ConsumerWidget {
 // once per app process (guarded by _notificationInitStarted below) and
 // deliberately NOT awaited: requesting notification permission must never
 // block the splash → grid/home redirect.
+//
+// IMPORTANT: this widget is ONLY ever built via the '/' route or the
+// `default` fallback case above — never navigate to it directly, and
+// never let a real feature route fall through to `default` (see the
+// '/word_list' comment above for the exact bug that caused).
 // ---------------------------------------------------------------------------
 
 bool _notificationInitStarted = false;

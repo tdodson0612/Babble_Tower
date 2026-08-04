@@ -21,6 +21,7 @@ class _TestWord {
   _TestWord({
     required this.word,
     required this.translation,
+    // ignore: unused_element_parameter
     this.result = _TestResult.unanswered,
   });
 }

@@ -6,8 +6,11 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/book_names.dart';
 import '../../../core/constants/supported_languages.dart';
 import '../../../data/services/prefs_service.dart';
+import '../../../domain/tutorial/example_home_tour_script.dart';
 import '../../providers/bible_provider.dart';
+import '../../providers/tutorial_provider.dart';
 import '../../widgets/review_entry_point.dart';
+import '../../widgets/tutorial/tutorial_target.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -26,6 +29,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void initState() {
     super.initState();
     _loadResume();
+
+    // First-time app tour — auto-starts exactly once (see
+    // TrackTutorialProgressUseCase), and stays manually re-triggerable
+    // forever via Settings > "Replay Tutorial". Post-frame callback so
+    // the TutorialTarget widgets below have actually mounted and
+    // registered their bounds before the overlay tries to spotlight
+    // them — same pattern reader_screen.dart already uses for its own
+    // one-time-per-block checks.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(tutorialControllerProvider.notifier)
+          .maybeAutoStart(homeIntroTutorial);
+    });
   }
 
   void _loadResume() {
@@ -65,13 +81,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: [
           // Spaced-repetition review entry point. Self-contained widget
           // (watches its own due-count provider) — see
-          // review_entry_point.dart.
-          const ReviewIconButton(),
-          // Phase 9: progress dashboard entry point.
-          IconButton(
-            icon: Icon(Icons.bar_chart_rounded, color: colors.textPrimary),
-            onPressed: () =>
-                Navigator.of(context).pushNamed('/progress'),
+          // review_entry_point.dart. Wrapped for the app tour — see
+          // example_home_tour_script.dart.
+          const TutorialTarget(
+            id: 'home_review_button',
+            child: ReviewIconButton(),
+          ),
+          // Phase 9: progress dashboard entry point. Wrapped for the
+          // app tour — see example_home_tour_script.dart.
+          TutorialTarget(
+            id: 'home_progress_button',
+            child: IconButton(
+              icon: Icon(Icons.bar_chart_rounded, color: colors.textPrimary),
+              onPressed: () =>
+                  Navigator.of(context).pushNamed('/progress'),
+            ),
           ),
           IconButton(
             icon: Icon(Icons.settings_outlined, color: colors.textPrimary),
@@ -97,9 +121,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
                 const SizedBox(height: 20),
               ],
-              _buildSectionLabel('Book', colors),
-              const SizedBox(height: 10),
-              _buildBookPicker(bibleState, colors),
+              // Book picker section — wrapped as a single tutorial
+              // target so the first-time tour can spotlight "pick a
+              // book to begin" as one step, rather than needing to
+              // target each individual book chip.
+              TutorialTarget(
+                id: 'home_book_picker',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSectionLabel('Book', colors),
+                    const SizedBox(height: 10),
+                    _buildBookPicker(bibleState, colors),
+                  ],
+                ),
+              ),
               if (bibleState.selectedBook != null) ...[
                 const SizedBox(height: 24),
                 _buildSectionLabel('Chapter', colors),

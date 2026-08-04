@@ -2,7 +2,6 @@
 
 import 'dart:convert';
 import 'package:flutter/services.dart';
-import '../../core/constants/supported_languages.dart';
 import '../../core/utils/text_normalizer.dart';
 import '../../domain/entities/verse.dart';
 import '../../domain/entities/verse_block.dart';
@@ -13,6 +12,61 @@ class BibleService {
 
   final Map<String, dynamic> _manifestCache = {};
   final Map<String, List<Verse>> _verseCache = {};
+
+  // ---------------------------------------------------------------------------
+  // USFM markup cleanup
+  //
+  // The raw asset JSON has residual USFM markup baked into some verses'
+  // "text" fields — most visibly \+w ...\+w* word-linking tags (used in
+  // USFM source to tie a surface form to a Strong's/lexicon entry), plus
+  // a stray literal "it" token that precedes Old-Testament quotation
+  // spans (almost certainly a mangled \qt-style milestone attribute that
+  // got flattened to plain text during conversion). Confirmed directly
+  // against the real Mark asset file this session — e.g. Mark 1:2's
+  // "\+w ἰδοὺ\+w* \+w ἐγὼ\+w* ..." and Mark 1:3 starting with
+  // "it \+w φωνὴ\+w* ...".
+  //
+  // Left unstripped, this corrupted TWO separate things:
+  //   1. The reader displayed the raw tags directly on screen.
+  //   2. TextNormalizer.normalizeWord()'s allowed-character set includes
+  //      a-zA-Z (needed elsewhere, e.g. apostrophe-adjacent forms), so
+  //      stripping the backslash/plus/asterisk from a tag left the bare
+  //      Latin letter "w" behind, fused onto the neighboring Greek word
+  //      with no space (the tag's closing half, \+w*, sits directly
+  //      against the word with no separator) — e.g. "κατασκευάσει"
+  //      became "κατασκευάσειw", which no dictionary entry could ever
+  //      match, hence the quiz's "(unknown word)" prompts.
+  //
+  // Fixed ONCE, here, at load time — every downstream consumer (reader,
+  // quiz vocabulary, dictionary lookups, Word List page, Grammar lesson,
+  // Hive-stored mastery) gets clean text automatically, rather than
+  // patching the same bug through five separate files.
+  //
+  // Deliberately general — \+TAG / \+TAG* for any letters, not
+  // hardcoded to \+w specifically — since USFM character-style markup
+  // always follows this shape (e.g. \+nd for divine names, \+add for
+  // translator-added words), and books other than Mark may carry tags
+  // not yet confirmed here.
+  static final RegExp _usfmTagRe = RegExp(r'\\\+[A-Za-z]+\*?');
+
+  // The stray milestone-artifact token. Word-bounded so it can never
+  // accidentally eat part of a real word — irrelevant in practice since
+  // this asset is 100% Greek text and never legitimately contains the
+  // Latin letters "it" as content, but bounded anyway for safety.
+  static final RegExp _standaloneItRe = RegExp(r'\bit\b');
+
+  static final RegExp _collapseSpacesRe = RegExp(r'\s+');
+
+  /// Strips the markup described above and collapses the whitespace
+  /// gaps left behind (removing a tag doesn't remove the space that sat
+  /// next to it, so multiple adjacent tag removals can leave doubled
+  /// spaces — same collapse-then-trim approach TextNormalizer already
+  /// uses elsewhere).
+  static String _stripUsfmMarkup(String raw) {
+    final noTags = raw.replaceAll(_usfmTagRe, '');
+    final noItMarker = noTags.replaceAll(_standaloneItRe, '');
+    return noItMarker.replaceAll(_collapseSpacesRe, ' ').trim();
+  }
 
   // ---------------------------------------------------------------------------
   // Public API (used by bible_provider and load_chapter_usecase)
@@ -49,6 +103,8 @@ class BibleService {
   }
 
   /// Loads and returns all verses for [book] + [chapter] in [languageCode].
+  /// Every verse's text is cleaned of residual USFM markup before it
+  /// leaves this method — see _stripUsfmMarkup's doc above.
   Future<List<Verse>> getVerses(
     String languageCode,
     String book,
@@ -68,7 +124,7 @@ class BibleService {
       final map = v as Map<String, dynamic>;
       return Verse(
         number: map['verse'] as int,
-        text:   map['text']  as String,
+        text:   _stripUsfmMarkup(map['text'] as String),
       );
     }).toList();
 

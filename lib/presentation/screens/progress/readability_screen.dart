@@ -16,7 +16,7 @@ import '../../../domain/usecases/readability_usecase.dart';
 final _readabilityProvider =
     FutureProvider.autoDispose<List<BookReadability>>((ref) async {
   final bibleService = BibleService();
-  final useCase      = const ReadabilityUseCase();
+  const useCase      = ReadabilityUseCase();
 
   // Build verseWordMap by loading all chapters for all available books.
   final verseWordMap  = <String, List<String>>{};

@@ -8,6 +8,9 @@ import '../../../data/services/backup_file_service.dart';
 import '../../../data/services/export_service.dart';
 import '../../../data/services/notification_service.dart';
 import '../../../domain/usecases/backup_usecase.dart';
+import '../../../domain/tutorial/example_home_tour_script.dart';
+import '../../../domain/usecases/migrate_corrupted_vocab_usecase.dart';
+import '../../providers/tutorial_provider.dart';
 import '../../providers/language_provider.dart';
 import '../../providers/settings_provider.dart';
 
@@ -96,6 +99,35 @@ class SettingsScreen extends ConsumerWidget {
               arguments: true, // fromSettings: true — shows back button
             ),
           ),
+          // Standalone, ungated Grammar reference (project handoff doc's
+          // Grammar cluster, item 6) — same "quick-reference entry point"
+          // pattern as the alphabet grid tile just above. Takes no
+          // arguments, unlike /grammar_lesson, since it browses every
+          // value rather than a due-filtered subset for one verse.
+          _NavTile(
+            title: 'Grammar Reference',
+            subtitle: 'Why Greek word endings change — case, tense & more',
+            icon: Icons.menu_book_rounded,
+            colors: colors,
+            onTap: () =>
+                Navigator.of(context).pushNamed('/grammar_reference'),
+          ),
+          // Re-runs the app tour on demand — per the handoff doc's
+          // explicit "re-triggerable anytime" requirement. Calls
+          // .start() directly (NOT .maybeAutoStart()), so it always
+          // runs regardless of whether it's already been auto-shown
+          // once. Uses the example script for now — see
+          // example_home_tour_script.dart's doc for what's still
+          // pending (real target widgets wired up on Home).
+          _NavTile(
+            title: 'Replay Tutorial',
+            subtitle: 'Show the app walkthrough again',
+            icon: Icons.replay_circle_filled_outlined,
+            colors: colors,
+            onTap: () => ref
+                .read(tutorialControllerProvider.notifier)
+                .start(homeIntroTutorial),
+          ),
           const SizedBox(height: 24),
 
           // ── Notifications ──────────────────────────────────────────────
@@ -150,6 +182,7 @@ class _DataSection extends ConsumerStatefulWidget {
 class _DataSectionState extends ConsumerState<_DataSection> {
   bool _backingUp = false;
   bool _restoring = false;
+  bool _cleaningUp = false;
 
   /// [buttonContext] is the "Back Up Data" tile's OWN context (see the
   /// Builder wrapping it below) — needed to compute sharePositionOrigin.
@@ -167,6 +200,7 @@ class _DataSectionState extends ConsumerState<_DataSection> {
       final jsonStr = const JsonEncoder.withIndent('  ').convert(backup);
       final timestamp = DateTime.now().toIso8601String().split('T').first;
 
+      // ignore: use_build_context_synchronously
       final box = buttonContext.findRenderObject() as RenderBox?;
       final origin =
           box != null ? (box.localToGlobal(Offset.zero) & box.size) : null;
@@ -240,6 +274,68 @@ class _DataSectionState extends ConsumerState<_DataSection> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// One-time cleanup for vocabulary entries corrupted by the USFM
+  /// word-linking markup bug — see MigrateCorruptedVocabUseCase's doc
+  /// for the full root-cause explanation. Confirmed first since this
+  /// deletes real Hive entries (the pure-garbage ones) and rewrites
+  /// others — same irreversible-action pattern as _restore above.
+  Future<void> _cleanUpCorruptedVocab() async {
+    if (_cleaningUp) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clean up corrupted vocabulary?'),
+        content: const Text(
+          'Scans your saved vocabulary for entries corrupted by a '
+          'text-loading bug (fixed this session) and repairs them — '
+          'merging any recovered progress into the correct word, and '
+          'deleting entries that have no real word to recover. This '
+          'cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Clean Up'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _cleaningUp = true);
+    try {
+      final pairKey = ref.read(languageProvider).pairKey;
+      final result = await MigrateCorruptedVocabUseCase().run(pairKey);
+
+      if (!result.hadAnyCorruption) {
+        _showSnack('No corrupted entries found — your vocabulary is clean.');
+      } else {
+        final parts = <String>[];
+        if (result.wordsFixed > 0) {
+          parts.add('${result.wordsFixed} word(s) repaired');
+        }
+        if (result.garbageDeleted > 0) {
+          parts.add('${result.garbageDeleted} garbage entry(ies) removed');
+        }
+        if (result.skippedUnrecognized > 0) {
+          parts.add(
+              '${result.skippedUnrecognized} left untouched (unrecognized)');
+        }
+        _showSnack('Done — ${parts.join(', ')}.');
+      }
+    } catch (e, st) {
+      debugPrint('[SettingsScreen] Vocab cleanup failed: $e\n$st');
+      _showSnack('Cleanup failed. Please try again.');
+    } finally {
+      if (mounted) setState(() => _cleaningUp = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -264,6 +360,15 @@ class _DataSectionState extends ConsumerState<_DataSection> {
           busy: _restoring,
           colors: colors,
           onTap: _restore,
+        ),
+        _ActionTile(
+          title: 'Clean Up Corrupted Vocabulary',
+          subtitle: 'One-time repair for a text-loading bug fixed this '
+              'session',
+          icon: Icons.healing_outlined,
+          busy: _cleaningUp,
+          colors: colors,
+          onTap: _cleanUpCorruptedVocab,
         ),
       ],
     );

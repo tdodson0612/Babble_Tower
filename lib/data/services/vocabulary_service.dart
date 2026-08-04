@@ -48,6 +48,16 @@ class VocabularyService {
     await box.putAll(map);
   }
 
+  /// Removes a single stored entry outright. Used by
+  /// MigrateCorruptedVocabUseCase to delete USFM-corrupted keys once
+  /// their real content (if any) has been recovered under the correct
+  /// key — not used anywhere in normal quiz/review flow, which only
+  /// ever adds or updates entries.
+  Future<void> delete(String pairKey, String word) async {
+    final box = await _box(pairKey);
+    await box.delete(word);
+  }
+
   /// Marks a word as known and bumps mastery by 1 (max 5).
   /// Clamp raised from 3 → 5 to match isMastered threshold in
   /// word_entry.dart (masteryLevel >= 5). See project handoff doc,
@@ -64,11 +74,18 @@ class VocabularyService {
   }
 
   /// Marks a word as not known and decrements mastery by 1 (min 0).
+  /// Also bumps timesWrong by 1 — this is the ONE place in the app that
+  /// does so, since every "wrong" signal (verse quiz misses, review
+  /// session misses, and the manual "✗ Not yet" tap) already funnels
+  /// through here via VocabularyNotifier.markUnknown(). See
+  /// WordEntry.timesWrong's doc for why this is tracked separately from
+  /// masteryLevel.
   Future<WordEntry> markUnknown(String pairKey, String word) async {
     final existing = await get(pairKey, word);
     final updated = (existing ?? _blank(pairKey, word)).copyWith(
       known: false,
       masteryLevel: ((existing?.masteryLevel ?? 1) - 1).clamp(0, 5),
+      timesWrong: (existing?.timesWrong ?? 0) + 1,
       lastReviewed: DateTime.now(),
     );
     await save(updated);
@@ -108,6 +125,7 @@ class VocabularyService {
         'translation': e.translation,
         'known': e.known,
         'masteryLevel': e.masteryLevel,
+        'timesWrong': e.timesWrong,
         'lastReviewed': e.lastReviewed.toIso8601String(),
       };
 
@@ -117,6 +135,7 @@ class VocabularyService {
         translation: m['translation'] as String? ?? '',
         known: m['known'] as bool? ?? false,
         masteryLevel: m['masteryLevel'] as int? ?? 0,
+        timesWrong: m['timesWrong'] as int? ?? 0,
         lastReviewed:
             DateTime.tryParse(m['lastReviewed'] as String? ?? '') ??
                 DateTime.now(),

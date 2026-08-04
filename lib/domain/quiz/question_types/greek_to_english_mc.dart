@@ -61,6 +61,7 @@ class McQuestionView extends StatefulWidget {
   final void Function(bool correct) onAnswered;
 
   const McQuestionView({
+    super.key,
     required this.prompt,
     required this.promptIsGreek,
     required this.options,
