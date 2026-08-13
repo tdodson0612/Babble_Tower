@@ -98,7 +98,7 @@ class _VocabularyScreenState extends ConsumerState<VocabularyScreen>
       backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: colors.background,
-        elevation: 0,
+        elevation: 1,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios, color: colors.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
@@ -214,10 +214,7 @@ class _WordList extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       itemCount: entries.length,
-      separatorBuilder: (_, __) => Divider(
-        color: colors.border,
-        height: 1,
-      ),
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (_, i) => _WordRow(
         entry: entries[i],
         colors: colors,
@@ -247,50 +244,64 @@ class _WordRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          _MasteryPip(level: entry.masteryLevel, colors: colors),
-          const SizedBox(width: 12),
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        child: Row(
+          children: [
+            _MasteryPip(level: entry.masteryLevel, colors: colors),
+            const SizedBox(width: 12),
 
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  entry.word,
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                if (entry.translation.isNotEmpty)
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    entry.translation,
+                    entry.word,
                     style: TextStyle(
-                      fontSize: 14,
-                      color: colors.textSecondary,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: colors.textPrimary,
                     ),
                   ),
-              ],
+                  if (entry.translation.isNotEmpty)
+                    Text(
+                      entry.translation,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: colors.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
 
-          if (onMarkKnown != null)
-            _ActionChip(
-              label: 'Known',
-              color: colors.primary,
-              onTap: () => onMarkKnown!(entry.word),
-            ),
-          if (onMarkUnknown != null)
-            _ActionChip(
-              label: 'Unlearn',
-              color: colors.accent,
-              onTap: () => onMarkUnknown!(entry.word),
-            ),
-        ],
+            if (onMarkKnown != null)
+              _ActionChip(
+                label: 'Known',
+                color: colors.primary,
+                onTap: () => onMarkKnown!(entry.word),
+              ),
+            if (onMarkUnknown != null)
+              _ActionChip(
+                label: 'Unlearn',
+                color: colors.accent,
+                onTap: () => onMarkUnknown!(entry.word),
+              ),
+          ],
+        ),
       ),
     );
   }

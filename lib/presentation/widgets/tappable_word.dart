@@ -50,8 +50,9 @@ class TappableWord extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
 
-    return GestureDetector(
+    return InkWell(
       onTap: () => _showDetail(context),
+      borderRadius: BorderRadius.circular(4),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
         child: Text(
@@ -71,22 +72,26 @@ class TappableWord extends StatelessWidget {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _WordDetailSheet(rawToken: rawToken, lemma: lemma),
+      builder: (_) => WordDetailSheet(rawToken: rawToken, lemma: lemma),
     );
   }
 }
 
-class _WordDetailSheet extends ConsumerStatefulWidget {
+class WordDetailSheet extends ConsumerStatefulWidget {
   final String rawToken;
   final String? lemma;
 
-  const _WordDetailSheet({required this.rawToken, required this.lemma});
+  const WordDetailSheet({
+    super.key,
+    required this.rawToken,
+    required this.lemma,
+  });
 
   @override
-  ConsumerState<_WordDetailSheet> createState() => _WordDetailSheetState();
+  ConsumerState<WordDetailSheet> createState() => _WordDetailSheetState();
 }
 
-class _WordDetailSheetState extends ConsumerState<_WordDetailSheet> {
+class _WordDetailSheetState extends ConsumerState<WordDetailSheet> {
   // ignore: prefer_const_constructors
   static final _dictionary = DictionaryService();
   // ignore: prefer_const_constructors

@@ -76,12 +76,16 @@ class MorphologyService {
   static String _bookFile(String book) {
     switch (book.toLowerCase()) {
       case 'matthew':
+      case 'ματθαῖος':
         return 'matthew';
       case 'mark':
+      case 'μάρκος':
         return 'mark';
       case 'luke':
+      case 'λουκᾶς':
         return 'luke';
       case 'john':
+      case 'ἰωάννης':
         return 'ioannis';
       default:
         return book.toLowerCase();

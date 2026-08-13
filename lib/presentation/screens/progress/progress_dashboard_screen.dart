@@ -104,7 +104,7 @@ class ProgressDashboardScreen extends ConsumerWidget {
       backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: colors.background,
-        elevation: 0,
+        elevation: 1,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios, color: colors.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
@@ -118,18 +118,20 @@ class ProgressDashboardScreen extends ConsumerWidget {
           ),
         ),
       ),
-      body: async.when(
-        loading: () => Center(
-          child: CircularProgressIndicator(color: colors.primary),
-        ),
-        error: (e, _) => Center(
-          child: Text(
-            'Could not load progress.\n$e',
-            style: AppTextStyles.body(context),
-            textAlign: TextAlign.center,
+      body: SafeArea(
+        child: async.when(
+          loading: () => Center(
+            child: CircularProgressIndicator(color: colors.primary),
           ),
+          error: (e, _) => Center(
+            child: Text(
+              'Could not load progress.\n$e',
+              style: AppTextStyles.body(context),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          data: (data) => _DashboardBody(data: data),
         ),
-        data: (data) => _DashboardBody(data: data),
       ),
     );
   }
@@ -185,24 +187,28 @@ class _DashboardBody extends StatelessWidget {
               value: '${data.totalWordsSeen}',
               icon: Icons.visibility_outlined,
               color: colors.primary,
+              onTap: () => Navigator.of(context).pushNamed('/vocabulary'),
             ),
             _Stat(
               label: 'Known',
               value: '${data.knownWords}',
               icon: Icons.check_circle_outline,
               color: colors.primary,
+              onTap: () => Navigator.of(context).pushNamed('/vocabulary'),
             ),
             _Stat(
               label: 'Mastered',
               value: '${data.masteredWords}',
               icon: Icons.star_outline_rounded,
               color: colors.accent,
+              onTap: () => Navigator.of(context).pushNamed('/vocabulary'),
             ),
             _Stat(
               label: 'Known %',
               value: '${(data.knownFraction * 100).round()}%',
               icon: Icons.pie_chart_outline_rounded,
               color: colors.accent,
+              onTap: () => Navigator.of(context).pushNamed('/vocabulary'),
             ),
           ],
         ),
@@ -226,24 +232,28 @@ class _DashboardBody extends StatelessWidget {
               value: '${data.versesAttempted}',
               icon: Icons.menu_book_outlined,
               color: colors.primary,
+              onTap: () => Navigator.of(context).pushNamed('/readability'),
             ),
             _Stat(
               label: 'Completed',
               value: '${data.versesCompleted}',
               icon: Icons.lock_open_outlined,
               color: colors.primary,
+              onTap: () => Navigator.of(context).pushNamed('/readability'),
             ),
             _Stat(
               label: 'Avg accuracy',
               value: '${(data.averageAccuracy * 100).round()}%',
               icon: Icons.track_changes_outlined,
               color: colors.accent,
+              onTap: () => Navigator.of(context).pushNamed('/readability'),
             ),
             _Stat(
               label: 'Total retries',
               value: '${data.totalRetries}',
               icon: Icons.replay_outlined,
               color: colors.accent,
+              onTap: () => Navigator.of(context).pushNamed('/readability'),
             ),
           ],
         ),
@@ -381,12 +391,14 @@ class _Stat {
   final String value;
   final IconData icon;
   final Color color;
+  final VoidCallback? onTap;
 
   const _Stat({
     required this.label,
     required this.value,
     required this.icon,
     required this.color,
+    this.onTap,
   });
 }
 
@@ -405,7 +417,9 @@ class _StatGrid extends StatelessWidget {
       crossAxisSpacing: 10,
       mainAxisSpacing: 10,
       childAspectRatio: 2.2,
-      children: stats.map((s) => _StatCard(stat: s, colors: colors)).toList(),
+      children: stats
+          .map((s) => _StatCard(stat: s, colors: colors))
+          .toList(),
     );
   }
 }
@@ -418,7 +432,7 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: colors.surface,
@@ -455,6 +469,18 @@ class _StatCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+
+    if (stat.onTap == null) return child;
+
+    return Material(
+      color: colors.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: stat.onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: child,
       ),
     );
   }

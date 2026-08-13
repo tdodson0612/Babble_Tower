@@ -78,5 +78,11 @@ class BackupUseCase {
         'vocab_$pairKey',
         HiveService.verseProgressBoxName(pairKey),
         HiveService.parsingProgressBoxName(pairKey),
+        // Grammar lesson "last taught" timestamps — must be backed up
+        // or the restore round trip silently drops the weekly-clock
+        // state, causing every grammar concept to reappear as "due"
+        // even though the user already taught it. Same per-pairKey
+        // convention as TrackGrammarLessonProgressUseCase._boxName.
+        'grammar_lesson_progress_$pairKey',
       ];
 }

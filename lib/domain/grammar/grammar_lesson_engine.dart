@@ -233,29 +233,34 @@ const Map<GrammarCategory, Map<String, GrammarValueExplanation>>
   },
 };
 
-/// One word paired with exactly one grammar category it should be
-/// taught on this session. A single verb can supply several of these at
+/// One word occurrence paired with every grammar category due for it
+/// on this session. A single verb can be due on several categories at
 /// once (person AND tense AND voice AND mood might all be due
-/// independently) — that's why this is a (word, category) pair and not
-/// just a word.
+/// independently) — this groups them under one item so the lesson
+/// teaches one actual word occurrence per page, rather than spawning
+/// separate pages for each category of the same word.
 class DueGrammarItem {
   final ParsingWord word;
-  final GrammarCategory category;
-  const DueGrammarItem({required this.word, required this.category});
+  final List<GrammarCategory> dueCategories;
+  const DueGrammarItem({
+    required this.word,
+    required this.dueCategories,
+  });
 }
 
-/// One teach card. [comparisonWord] is set only when another due item
-/// shares this word's lemma AND category but a DIFFERENT code — the
-/// "θεός vs θεόν" moment, generalized to any category (e.g. the same
-/// verb lemma in active vs. passive voice). Null is the common case.
+/// One teach card — one actual word occurrence, with all its due grammar
+/// properties grouped on the same page. [comparisonWord] is set only
+/// when another due item shares this word's lemma in one of the same
+/// categories but carries a DIFFERENT code — the "θεός vs θεόν" moment,
+/// generalized to any category. Null is the common case.
 class GrammarTeachCard {
   final ParsingWord word;
-  final GrammarValueExplanation explanation;
+  final List<GrammarValueExplanation> explanations;
   final ParsingWord? comparisonWord;
 
   const GrammarTeachCard({
     required this.word,
-    required this.explanation,
+    required this.explanations,
     this.comparisonWord,
   });
 }
@@ -357,7 +362,8 @@ class GrammarLessonEngine {
   /// TrackGrammarLessonProgressUseCase.recordTaught, resetting the
   /// weekly clock for exactly these values.
   Set<String> get taughtKeys => _cards
-      .map((c) => grammarKey(c.explanation.category, c.explanation.code))
+      .expand((c) => c.explanations)
+      .map((e) => grammarKey(e.category, e.code))
       .toSet();
 
   // ── Construction ─────────────────────────────────────────────────────
@@ -365,35 +371,46 @@ class GrammarLessonEngine {
   List<GrammarTeachCard> _buildTeachCards(List<DueGrammarItem> dueItems) {
     final cards = <GrammarTeachCard>[];
     for (final item in dueItems) {
-      final code = item.word.codeFor(item.category);
-      if (code == null) continue;
+      final explanations = <GrammarValueExplanation>[];
+      for (final category in item.dueCategories) {
+        final code = item.word.codeFor(category);
+        if (code == null) continue;
 
-      final categoryMap = grammarExplanations[item.category];
-      if (categoryMap == null) continue;
+        final categoryMap = grammarExplanations[category];
+        if (categoryMap == null) continue;
 
-      final explanation = categoryMap[code];
-      if (explanation == null) continue;
+        final explanation = categoryMap[code];
+        if (explanation == null) continue;
 
-      // Same-lemma, same-category, different-code comparison, searched
-      // within this same due-item set only — see class doc.
+        explanations.add(explanation);
+      }
+
+      if (explanations.isEmpty) continue;
+
+      // Same-lemma comparison: search across all due items for a
+      // different occurrence of the same lemma in any of the same
+      // categories but with a different code.
       ParsingWord? comparison;
+      outer:
       for (final other in dueItems) {
-        if (identical(other.word, item.word) &&
-            other.category == item.category) {
-          continue;
-        }
-        if (other.category != item.category) continue;
+        if (identical(other.word, item.word)) continue;
         if (other.word.lemma.isEmpty || other.word.lemma != item.word.lemma) {
           continue;
         }
-        if (other.word.codeFor(other.category) == code) continue;
-        comparison = other.word;
-        break;
+        for (final cat in item.dueCategories) {
+          if (!other.dueCategories.contains(cat)) continue;
+          final itemCode = item.word.codeFor(cat);
+          final otherCode = other.word.codeFor(cat);
+          if (itemCode != null && otherCode != null && itemCode != otherCode) {
+            comparison = other.word;
+            break outer;
+          }
+        }
       }
 
       cards.add(GrammarTeachCard(
         word: item.word,
-        explanation: explanation,
+        explanations: explanations,
         comparisonWord: comparison,
       ));
     }
@@ -401,29 +418,26 @@ class GrammarLessonEngine {
   }
 
   List<GrammarQuizQuestion> _buildQuizQueue(List<GrammarTeachCard> cards) {
-    final questions = cards.map((card) {
-      final categoryValues =
-          grammarExplanations[card.explanation.category]!.values;
-      final pool =
-          categoryValues.where((e) => e.code != card.explanation.code).toList()
-            ..shuffle(_random);
-      // Up to 3 distractors — categories with fewer total values (e.g.
-      // person, with only 1st/2nd/3rd) simply get a smaller MC set.
-      final take = pool.length < 3 ? pool.length : 3;
-      final options = [card.explanation, ...pool.take(take)]
-        ..shuffle(_random);
-      // Reference equality — safe because every GrammarValueExplanation
-      // instance comes from the shared const `grammarExplanations` map,
-      // never a freshly-constructed copy. Same reasoning
-      // AlphabetQuizEngine uses for LetterEntry.
-      final correctIndex = options.indexOf(card.explanation);
-      return GrammarQuizQuestion(
-        word: card.word,
-        correctExplanation: card.explanation,
-        options: options,
-        correctIndex: correctIndex,
-      );
-    }).toList();
+    final questions = <GrammarQuizQuestion>[];
+    for (final card in cards) {
+      for (final explanation in card.explanations) {
+        final categoryValues =
+            grammarExplanations[explanation.category]!.values;
+        final pool =
+            categoryValues.where((e) => e.code != explanation.code).toList()
+              ..shuffle(_random);
+        final take = pool.length < 3 ? pool.length : 3;
+        final options = [explanation, ...pool.take(take)]
+          ..shuffle(_random);
+        final correctIndex = options.indexOf(explanation);
+        questions.add(GrammarQuizQuestion(
+          word: card.word,
+          correctExplanation: explanation,
+          options: options,
+          correctIndex: correctIndex,
+        ));
+      }
+    }
     questions.shuffle(_random);
     return questions;
   }

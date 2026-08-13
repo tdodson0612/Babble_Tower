@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 260" width="240" height="260">
+  <ellipse cx="100" cy="248" rx="16" ry="9" fill="#B05A3A"/>
+  <ellipse cx="140" cy="248" rx="16" ry="9" fill="#B05A3A"/>
+  <ellipse cx="120" cy="178" rx="72" ry="66" fill="#F5E3C5"/>
+  <ellipse cx="120" cy="188" rx="44" ry="46" fill="#FCF4E0"/>
+  <ellipse cx="55" cy="178" rx="23" ry="46" fill="#B05A3A" transform="rotate(-14 55 178)"/>
+  <!-- right wing, extended straight out pointing -->
+  <ellipse cx="205" cy="168" rx="20" ry="42" fill="#B05A3A" transform="rotate(85 205 168)"/>
+  <path d="M83 62 Q74 26 100 48 Z" fill="#B05A3A"/>
+  <path d="M157 62 Q166 26 140 48 Z" fill="#B05A3A"/>
+  <circle cx="120" cy="96" r="70" fill="#F5E3C5"/>
+  <ellipse cx="120" cy="106" rx="52" ry="44" fill="#FCF4E0"/>
+  <g fill="#8FAE7D">
+    <path d="M58 54 Q42 44 53 27 Q61 43 58 54 Z"/>
+    <path d="M74 38 Q60 25 73 11 Q80 27 74 38 Z"/>
+    <path d="M93 27 Q82 12 97 2 Q102 19 93 27 Z"/>
+    <path d="M182 54 Q198 44 187 27 Q179 43 182 54 Z"/>
+    <path d="M166 38 Q180 25 167 11 Q160 27 166 38 Z"/>
+    <path d="M147 27 Q158 12 143 2 Q138 19 147 27 Z"/>
+  </g>
+  <!-- eyes looking slightly toward the pointing direction -->
+  <circle cx="94" cy="101" r="25" fill="#FFFFFF"/>
+  <circle cx="146" cy="101" r="25" fill="#FFFFFF"/>
+  <circle cx="99" cy="103" r="13.5" fill="#5C3A21"/>
+  <circle cx="151" cy="103" r="13.5" fill="#5C3A21"/>
+  <circle cx="94" cy="98" r="4.5" fill="#FFFFFF"/>
+  <circle cx="146" cy="98" r="4.5" fill="#FFFFFF"/>
+  <path d="M120 120 L111 135 L129 135 Z" fill="#E8A33D"/>
+  <path d="M106 142 Q120 151 134 142" stroke="#B05A3A" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+</svg>

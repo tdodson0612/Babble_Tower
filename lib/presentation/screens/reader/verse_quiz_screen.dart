@@ -299,7 +299,9 @@ class _VerseQuizScreenState extends ConsumerState<VerseQuizScreen> {
                 ),
               ),
       ),
-      body: _done ? _buildResults(colors) : _buildQuiz(colors),
+      body: SafeArea(
+        child: _done ? _buildResults(colors) : _buildQuiz(colors),
+      ),
     );
   }
 

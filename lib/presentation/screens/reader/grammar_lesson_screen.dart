@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/services/sound_service.dart';
+import '../../../data/services/pronunciation_service.dart';
 import '../../../domain/entities/parsing_word.dart';
 import '../../../domain/grammar/grammar_lesson_engine.dart';
 import '../../../domain/usecases/track_grammar_lesson_progress_usecase.dart';
@@ -37,6 +38,7 @@ class GrammarLessonScreen extends StatefulWidget {
 
 class _GrammarLessonScreenState extends State<GrammarLessonScreen> {
   static const _progress = TrackGrammarLessonProgressUseCase();
+  static const _pronunciation = PronunciationService();
   late final GrammarLessonEngine _engine;
 
   @override
@@ -60,7 +62,10 @@ class _GrammarLessonScreenState extends State<GrammarLessonScreen> {
       appBar: AppBar(
         backgroundColor: colors.background,
         elevation: 0,
-        automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: Icon(Icons.close, color: colors.textPrimary),
+          onPressed: () => Navigator.of(context).pop('exited'),
+        ),
         title: Text(
           'Why did the ending change?',
           style: TextStyle(
@@ -80,10 +85,6 @@ class _GrammarLessonScreenState extends State<GrammarLessonScreen> {
 
   Widget _buildTeach(AppColors colors) {
     final card = _engine.currentCard;
-    final exp = card.explanation;
-    // Canonical grammatical term, e.g. "Aorist" or "Passive" — pulled
-    // directly from ParsingWord.labelFor rather than duplicated here.
-    final properName = ParsingWord.labelFor(exp.category, exp.code);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
@@ -97,115 +98,102 @@ class _GrammarLessonScreenState extends State<GrammarLessonScreen> {
           const SizedBox(height: 24),
           Expanded(
             child: SingleChildScrollView(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      card.word.word,
-                      style: TextStyle(
-                        fontSize: 40,
-                        fontWeight: FontWeight.w700,
-                        color: colors.textPrimary,
-                      ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    card.word.word,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 40,
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
                     ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: colors.highlight,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            exp.category.displayName.toUpperCase(),
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.6,
-                              color: colors.textSecondary,
-                            ),
+                  ),
+                   const SizedBox(height: 12),
+                   if (card.word.lemma.isNotEmpty)
+                     _LemmaVerseFormDiff(
+                       lemma: card.word.lemma,
+                       verseForm: card.word.word,
+                       colors: colors,
+                       pronunciation: _pronunciation,
+                     ),
+                   const SizedBox(height: 20),
+                   if (card.comparisonWord != null)
+                     _ComparisonRow(
+                       primaryWord: card.word,
+                       comparisonWord: card.comparisonWord!,
+                       colors: colors,
+                     ),
+                   const SizedBox(height: 20),
+                   ...card.explanations.map((exp) {
+                    final properName =
+                        ParsingWord.labelFor(exp.category, exp.code);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: colors.highlight,
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                          Text(
-                            properName,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: colors.accent,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                exp.category.displayName.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.6,
+                                  color: colors.textSecondary,
+                                ),
+                              ),
+                              Text(
+                                properName,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: colors.accent,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      exp.question,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: colors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      exp.plainEnglish,
-                      textAlign: TextAlign.center,
-                      style:
-                          TextStyle(fontSize: 15, color: colors.textSecondary),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      exp.exampleGloss,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontStyle: FontStyle.italic,
-                        color: colors.textSecondary,
-                      ),
-                    ),
-                    // Dictionary form vs. this verse's actual form —
-                    // ALWAYS shown, for every category (case, person,
-                    // tense, voice, mood), since every ParsingWord
-                    // already carries its own citation form via
-                    // .lemma. Replaces an earlier version of this
-                    // section that only appeared when another due word
-                    // happened to share the same lemma — this works
-                    // every time instead. The part of the word that
-                    // actually differs is highlighted in both forms,
-                    // so the ending change is visually obvious rather
-                    // than making the learner compare two full words
-                    // letter by letter.
-                    if (card.word.lemma.isNotEmpty &&
-                        card.word.lemma != card.word.word) ...[
-                      const SizedBox(height: 24),
-                      Divider(color: colors.border),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Dictionary form → this verse',
-                        style: TextStyle(
-                            fontSize: 12, color: colors.textSecondary),
-                      ),
-                      const SizedBox(height: 10),
-                      _WordEndingDiff(
-                        lemma: card.word.lemma,
-                        surfaceForm: card.word.word,
-                        colors: colors,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Same word — the ending changed to show its job '
-                        'in this sentence.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontSize: 12, color: colors.textSecondary),
-                      ),
-                    ],
-                  ],
-                ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          exp.question,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: colors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          exp.plainEnglish,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 15, color: colors.textSecondary),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          exp.exampleGloss,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontStyle: FontStyle.italic,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    );
+                  }),
+                ],
               ),
             ),
           ),
@@ -347,6 +335,283 @@ class _GrammarLessonScreenState extends State<GrammarLessonScreen> {
   }
 }
 
+/// Consolidated lemma → verse-form presentation.
+///
+/// Replaces the earlier pair of [_LemmaVerseFormRow] + [_WordEndingDiff],
+/// which both presented the same lemma-vs-verse-form comparison — the row
+/// showed "Lemma: X" / "Verse Form: Y" + pronunciation romanization, while
+/// the diff re-shown the same two forms as a split-word ending highlight.
+/// That was redundant: the lemma and verse form appeared twice on the same
+/// card.
+///
+/// This single widget now:
+///   1. Identifies the lemma and verse form once (with labels).
+///   2. Makes pronunciation available once — a working TTS button that
+///      plays the verse form (the word as it actually appears in this
+///      verse), plus the romanized modern-Greek pronunciation for both
+///      forms shown as display text (no separate Koine audio, per the
+///      PronunciationService class doc).
+///   3. Shows the ending-diff visualization (stem dimmed, ending
+///      accented) ONLY when the forms genuinely differ, so the "what
+///      changed" hint isn't wasted on identical forms.
+class _LemmaVerseFormDiff extends StatefulWidget {
+  final String lemma;
+  final String verseForm;
+  final AppColors colors;
+  final PronunciationService pronunciation;
+
+  const _LemmaVerseFormDiff({
+    required this.lemma,
+    required this.verseForm,
+    required this.colors,
+    required this.pronunciation,
+  });
+
+  @override
+  State<_LemmaVerseFormDiff> createState() => _LemmaVerseFormDiffState();
+}
+
+class _LemmaVerseFormDiffState extends State<_LemmaVerseFormDiff> {
+  bool _speaking = false;
+
+  Future<void> _toggleSpeak() async {
+    if (_speaking) {
+      await widget.pronunciation.stop();
+      if (mounted) setState(() => _speaking = false);
+    } else {
+      setState(() => _speaking = true);
+      await widget.pronunciation.speak(widget.verseForm);
+      if (mounted) setState(() => _speaking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    final lemmaPair = widget.pronunciation.getPair(widget.lemma);
+    final formPair = widget.pronunciation.getPair(widget.verseForm);
+    final formsDiffer =
+        _formsGenuinelyDiffer(widget.lemma, widget.verseForm);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Lemma: ${widget.lemma}',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: colors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  _TtsButtonSmall(
+                    word: widget.verseForm,
+                    colors: colors,
+                    speaking: _speaking,
+                    onTap: _toggleSpeak,
+                  ),
+                ],
+              ),
+              if (lemmaPair.modernDisplay.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    lemmaPair.modernDisplay,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colors.textSecondary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                'Verse Form: ${widget.verseForm}',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: colors.textSecondary,
+                ),
+              ),
+              if (formPair.modernDisplay.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    formPair.modernDisplay,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colors.textSecondary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (formsDiffer) ...[
+          const SizedBox(height: 20),
+          Divider(color: colors.border),
+          const SizedBox(height: 12),
+          Text(
+            'Dictionary form → this verse',
+            style: TextStyle(
+              fontSize: 12,
+              color: colors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _WordEndingDiff(
+            lemma: widget.lemma,
+            surfaceForm: widget.verseForm,
+            colors: colors,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Same word — the ending changed to show its job '
+            'in this sentence.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              color: colors.textSecondary,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Small circular TTS button matching the pattern in verse_quiz_screen.dart.
+class _TtsButtonSmall extends StatelessWidget {
+  final String word;
+  final AppColors colors;
+  final bool speaking;
+  final VoidCallback onTap;
+
+  const _TtsButtonSmall({
+    required this.word,
+    required this.colors,
+    required this.speaking,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: speaking
+              ? colors.primary.withValues(alpha: 0.15)
+              : colors.highlight,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          speaking ? Icons.stop_rounded : Icons.volume_up_rounded,
+          size: 14,
+          color: speaking ? colors.primary : colors.textSecondary,
+        ),
+      ),
+    );
+  }
+}
+
+class _ComparisonRow extends StatelessWidget {
+  final ParsingWord primaryWord;
+  final ParsingWord comparisonWord;
+  final AppColors colors;
+
+  const _ComparisonRow({
+    required this.primaryWord,
+    required this.comparisonWord,
+    required this.colors,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.highlight.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Compare:',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  comparisonWord.word,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.arrow_forward, size: 16, color: colors.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Same lemma:',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  comparisonWord.lemma,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: colors.accent,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Word-ending diff — highlights just the part of the word that changed
 // between the dictionary citation form and how it actually appears in
@@ -363,12 +628,28 @@ class _WordSplit {
   const _WordSplit({required this.stem, required this.ending});
 }
 
-/// Splits [lemma] and [surfaceForm] at their longest common prefix.
-/// E.g. ("λόγος", "λόγῳ") -> stem "λόγ", lemma ending "ος", form
-/// ending "ῳ". If the two strings share no prefix at all (rare, but
-/// possible for irregular/suppletive forms), the "stem" is simply
-/// empty and each ending is the whole word — still renders correctly,
-/// just without a highlighted common part.
+String _normalizeForComparison(String s) {
+  final buffer = StringBuffer();
+  for (final codePoint in s.runes) {
+    if ((codePoint >= 0x0300 && codePoint <= 0x036F) ||
+        (codePoint >= 0x1AB0 && codePoint <= 0x1AFF) ||
+        (codePoint >= 0x1DC0 && codePoint <= 0x1DFF) ||
+        (codePoint >= 0x20D0 && codePoint <= 0x20FF) ||
+        (codePoint >= 0xFE20 && codePoint <= 0xFE2F)) {
+      continue;
+    }
+    buffer.writeCharCode(codePoint);
+  }
+  return buffer.toString().toLowerCase();
+}
+
+bool _formsGenuinelyDiffer(String lemma, String surfaceForm) {
+  if (lemma.isEmpty) return false;
+  final a = _normalizeForComparison(lemma);
+  final b = _normalizeForComparison(surfaceForm);
+  return a != b;
+}
+
 (_WordSplit, _WordSplit) _splitAtCommonPrefix(String lemma, String surfaceForm) {
   var i = 0;
   final minLen = lemma.length < surfaceForm.length
@@ -412,11 +693,6 @@ class _WordEndingDiff extends StatelessWidget {
     );
   }
 
-  /// [dimStem] uses a muted color for the dictionary-form's stem (since
-  /// it's the reference point, not the focus) versus the full-strength
-  /// text color for the verse's actual form. The ending is ALWAYS the
-  /// accent color, in both words — that's the part the learner should
-  /// be looking at.
   Widget _buildSplitWord(_WordSplit split, {required bool dimStem}) {
     return RichText(
       text: TextSpan(

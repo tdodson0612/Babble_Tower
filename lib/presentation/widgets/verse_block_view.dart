@@ -197,26 +197,33 @@ class _VerseRow extends StatelessWidget {
           padding: const EdgeInsets.only(left: 20, top: 6),
           child: GestureDetector(
             onTap: onToggleReveal,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  revealed
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                  size: 14,
-                  color: colors.accent,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  revealed ? 'Hide translation' : 'Show translation',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: colors.highlight.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    revealed
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    size: 14,
                     color: colors.accent,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  Text(
+                    revealed ? 'Hide translation' : 'Show translation',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colors.accent,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

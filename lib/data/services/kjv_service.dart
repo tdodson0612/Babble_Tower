@@ -82,11 +82,20 @@ class KjvService {
 
   static String _bookFile(String book) {
     switch (book.toLowerCase()) {
-      case 'matthew': return 'matthew';
-      case 'mark':    return 'mark';
-      case 'luke':    return 'luke';
-      case 'john':    return 'john';
-      default:        return book.toLowerCase();
+      case 'matthew':
+      case 'ματθαῖος':
+        return 'matthew';
+      case 'mark':
+      case 'μάρκος':
+        return 'mark';
+      case 'luke':
+      case 'λουκᾶς':
+        return 'luke';
+      case 'john':
+      case 'ἰωάννης':
+        return 'john';
+      default:
+        return book.toLowerCase();
     }
   }
 }

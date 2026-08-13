@@ -7,6 +7,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../data/services/kjv_service.dart';
 import '../../../data/services/morphology_service.dart';
 import '../../../data/services/pronunciation_service.dart';
+import '../../../domain/entities/parsing_word.dart';
 import '../../../domain/entities/verse.dart';
 import '../../../domain/grammar/grammar_lesson_engine.dart';
 import '../../../domain/usecases/track_grammar_lesson_progress_usecase.dart';
@@ -135,6 +136,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final block = bibleState.currentBlock;
     if (block == null) return;
 
+    final navigator = Navigator.of(context);
+
     // Build the verse label e.g. "Matthew 1:3"
     final book    = bibleState.selectedBook ?? '';
     final chapter = bibleState.selectedChapter ?? 1;
@@ -158,43 +161,69 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final morphology =
         await _morphologyService.wordsForVerse(book, chapter, verse);
 
-    // First occurrence of each (category, code) combined key, in verse
-    // order.
-    final firstItemForKey = <String, DueGrammarItem>{};
-    for (final w in morphology) {
-      for (final category in w.availableCategories) {
-        final code = w.codeFor(category);
-        if (code == null) continue;
-        final key = grammarKey(category, code);
-        firstItemForKey.putIfAbsent(
-          key,
-          () => DueGrammarItem(word: w, category: category),
-        );
+    if (morphology.isNotEmpty) {
+      final allKeys = <String>{};
+      for (final w in morphology) {
+        for (final category in w.availableCategories) {
+          final code = w.codeFor(category);
+          if (code == null) continue;
+          allKeys.add(grammarKey(category, code));
+        }
       }
-    }
 
-    if (firstItemForKey.isNotEmpty) {
-      final due = await _grammarLessonProgress.dueKeys(
-        langState.pairKey,
-        firstItemForKey.keys,
-      );
-      if (due.isNotEmpty) {
-        final dueItems = due.map((k) => firstItemForKey[k]!).toList();
-        if (mounted) {
-          await Navigator.of(context).pushNamed(
+      if (allKeys.isNotEmpty) {
+        final due = await _grammarLessonProgress.dueKeys(
+          langState.pairKey,
+          allKeys,
+        );
+
+        if (due.isNotEmpty) {
+          final wordDueCategories = <ParsingWord, List<GrammarCategory>>{};
+          for (final w in morphology) {
+            for (final category in w.availableCategories) {
+              final code = w.codeFor(category);
+              if (code == null) continue;
+              final key = grammarKey(category, code);
+              if (due.contains(key)) {
+                wordDueCategories.putIfAbsent(w, () => []);
+                if (!wordDueCategories[w]!.contains(category)) {
+                  wordDueCategories[w]!.add(category);
+                }
+              }
+            }
+          }
+
+          final dueItems = wordDueCategories.entries.map((entry) {
+            return DueGrammarItem(
+              word: entry.key,
+              dueCategories: entry.value,
+            );
+          }).toList();
+
+          final grammarResult = await navigator.pushNamed(
             '/grammar_lesson',
             arguments: GrammarLessonArgs(
               items: dueItems,
               pairKey: langState.pairKey,
             ),
           );
+
+          if (grammarResult == 'exited') {
+            if (mounted) {
+              navigator.pushNamedAndRemoveUntil(
+                '/home',
+                (route) => false,
+              );
+            }
+            return;
+          }
         }
       }
     }
 
     if (!mounted) return;
 
-    final passed = await Navigator.of(context).pushNamed(
+    final passed = await navigator.pushNamed(
       '/verse_quiz',
       arguments: VerseQuizArgs(
         verseText:   block.verses.map((v) => v.text).join(' '),
@@ -263,7 +292,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: colors.background,
-        elevation: 0,
+        elevation: 1,
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: colors.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
@@ -450,7 +479,16 @@ class _ReviewBanner extends StatelessWidget {
     final colors = context.colors;
     return Container(
       width: double.infinity,
-      color: colors.highlight,
+      decoration: BoxDecoration(
+        color: colors.highlight,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -522,6 +560,15 @@ class _VerseIndicator extends StatelessWidget {
               decoration: BoxDecoration(
                 color: i < current ? colors.primary : colors.border,
                 borderRadius: BorderRadius.circular(3),
+                boxShadow: i < current
+                    ? [
+                        BoxShadow(
+                          color: colors.primary.withValues(alpha: 0.4),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ]
+                    : null,
               ),
             ),
           ),
@@ -727,6 +774,13 @@ class _BottomNav extends StatelessWidget {
         decoration: BoxDecoration(
           color: colors.surface,
           border: Border(top: BorderSide(color: colors.border)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 12,
+              offset: const Offset(0, -2),
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,

@@ -147,7 +147,7 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
       backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: colors.background,
-        elevation: 0,
+        elevation: 1,
         leading: IconButton(
           icon: Icon(Icons.close, color: colors.textPrimary),
           onPressed: () => Navigator.of(context).pop(),

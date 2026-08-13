@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/pronunciation_service.dart';
 import '../../../domain/entities/parsing_word.dart';
 import '../../../domain/grammar/grammar_lesson_engine.dart';
 
@@ -67,14 +68,16 @@ class GrammarReferenceScreen extends StatelessWidget {
           ],
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: [
-          const _EndingsChartSection(),
-          const SizedBox(height: 24),
-          for (final category in _sectionOrder)
-            _CategorySection(category: category, colors: colors),
-        ],
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: [
+            const _EndingsChartSection(),
+            const SizedBox(height: 24),
+            for (final category in _sectionOrder)
+              _CategorySection(category: category, colors: colors),
+          ],
+        ),
       ),
     );
   }
@@ -516,6 +519,13 @@ class _ParadigmTable extends StatelessWidget {
 
   const _ParadigmTable({required this.paradigm, required this.colors});
 
+  static const _pronunciation = PronunciationService();
+
+  String _pronunciationFor(String text) {
+    final pair = _pronunciation.getPair(text);
+    return pair.modernDisplay;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -575,8 +585,9 @@ class _ParadigmTable extends StatelessWidget {
           Divider(color: colors.border, height: 14),
           for (final row in paradigm.rows)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     flex: 3,
@@ -591,16 +602,42 @@ class _ParadigmTable extends StatelessWidget {
                   ),
                   Expanded(
                     flex: 4,
-                    child: Text(
-                      row.left,
-                      style: TextStyle(fontSize: 13, color: colors.accent),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          row.left,
+                          style: TextStyle(fontSize: 13, color: colors.accent),
+                        ),
+                        Text(
+                          _pronunciationFor(row.left),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colors.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Expanded(
                     flex: 4,
-                    child: Text(
-                      row.right,
-                      style: TextStyle(fontSize: 13, color: colors.accent),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          row.right,
+                          style: TextStyle(fontSize: 13, color: colors.accent),
+                        ),
+                        Text(
+                          _pronunciationFor(row.right),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colors.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

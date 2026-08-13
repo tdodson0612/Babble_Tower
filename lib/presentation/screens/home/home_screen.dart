@@ -69,7 +69,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: colors.background,
-        elevation: 0,
+        elevation: 1,
         title: Text(
           'Babble Tower',
           style: TextStyle(
@@ -106,7 +106,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding: EdgeInsets.fromLTRB(
+            20,
+            16,
+            20,
+            16 + MediaQuery.of(context).padding.bottom,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -121,10 +126,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
                 const SizedBox(height: 20),
               ],
-              // Book picker section — wrapped as a single tutorial
-              // target so the first-time tour can spotlight "pick a
-              // book to begin" as one step, rather than needing to
-              // target each individual book chip.
               TutorialTarget(
                 id: 'home_book_picker',
                 child: Column(
@@ -309,6 +310,7 @@ class _ContinueCard extends StatelessWidget {
     final colors = context.colors;
 
     return Material(
+      elevation: 2,
       color: colors.primary,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
@@ -434,6 +436,15 @@ class _BookChip extends StatelessWidget {
           border: Border.all(
             color: selected ? colors.primary : colors.border,
           ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: colors.primary.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
