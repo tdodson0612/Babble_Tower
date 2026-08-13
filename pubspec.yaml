@@ -1,6 +1,6 @@
 name: babble_tower
 description: A language learning app teaching English speakers to read Koine Greek through the four Gospels.
-version: 1.0.0+16
+version: 1.0.0+17
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
