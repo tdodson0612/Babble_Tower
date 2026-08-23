@@ -3,6 +3,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/pronunciation_service.dart';
 import '../quiz_models.dart';
 import '../quiz_question.dart';
 
@@ -64,6 +65,8 @@ class _MatchingPairsView extends StatefulWidget {
 }
 
 class _MatchingPairsViewState extends State<_MatchingPairsView> {
+  static const _pronunciation = PronunciationService();
+
   late List<QuizWord> _greekColumn;
   late List<QuizWord> _englishColumn;
 
@@ -185,6 +188,7 @@ class _MatchingPairsViewState extends State<_MatchingPairsView> {
                   final selected = _selectedGreekIndex == i;
                   return _PairTile(
                     label: w.word,
+                    pronunciation: _pronunciation.getPair(w.word).modernGreek,
                     matched: matched,
                     selected: selected,
                     wrong: false,
@@ -219,6 +223,7 @@ class _MatchingPairsViewState extends State<_MatchingPairsView> {
 
 class _PairTile extends StatelessWidget {
   final String label;
+  final String? pronunciation;
   final bool matched;
   final bool selected;
   final bool wrong;
@@ -226,6 +231,7 @@ class _PairTile extends StatelessWidget {
 
   const _PairTile({
     required this.label,
+    this.pronunciation,
     required this.matched,
     required this.selected,
     required this.wrong,
@@ -267,14 +273,31 @@ class _PairTile extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-              color: matched ? colors.primary : colors.textPrimary,
-            ),
-            textAlign: TextAlign.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: matched ? colors.primary : colors.textPrimary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (pronunciation != null && pronunciation!.isNotEmpty)
+                Text(
+                  pronunciation!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                    color: matched
+                        ? colors.primary.withValues(alpha: 0.8)
+                        : colors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+            ],
           ),
         ),
       ),

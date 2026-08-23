@@ -183,6 +183,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildBookPicker(BibleState bibleState, AppColors colors) {
     final books        = bibleState.availableBooks;
     final englishNames = getBookNames('en');
+    // Primary chip label should be the Greek book name, with English as
+    // a subtitle underneath -- see book_names.dart's doc comment. `book`
+    // itself (the manifest's identifier, currently English) is left
+    // untouched below: it's what gets passed to selectBook() and
+    // compared against bibleState.selectedBook, and BibleService's
+    // _bookFile() already resolves either form correctly, so changing
+    // only the DISPLAYED label carries no risk to book/chapter loading.
+    final greekNames   = getBookNames('el');
 
     if (books.isEmpty) {
       return Center(
@@ -199,11 +207,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       children: List.generate(books.length, (index) {
         final book     = books[index];
         final selected = book == bibleState.selectedBook;
+        final label = index < greekNames.length
+            ? greekNames[index]
+            : book;
         final subtitle = index < englishNames.length
             ? englishNames[index]
             : null;
         return _BookChip(
-          label:    book,
+          label:    label,
           subtitle: subtitle,
           selected: selected,
           colors:   colors,

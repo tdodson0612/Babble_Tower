@@ -84,5 +84,12 @@ class BackupUseCase {
         // even though the user already taught it. Same per-pairKey
         // convention as TrackGrammarLessonProgressUseCase._boxName.
         'grammar_lesson_progress_$pairKey',
+        // Tutorial completion state — a SINGLE box shared across all
+        // language pairs (not per-pairKey, unlike everything else in
+        // this list). Same literal as
+        // TrackTutorialProgressUseCase._boxName. Previously missing
+        // here, which meant a restore would silently replay the
+        // onboarding tutorial for a user who had already completed it.
+        'tutorial_progress',
       ];
 }

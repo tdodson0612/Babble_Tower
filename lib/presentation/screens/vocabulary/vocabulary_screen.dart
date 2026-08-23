@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/services/export_service.dart';
+import '../../../data/services/pronunciation_service.dart';
 import '../../../domain/entities/word_entry.dart';
 import '../../../domain/usecases/export_vocabulary_usecase.dart';
 import '../../providers/vocabulary_provider.dart';
@@ -230,6 +231,8 @@ class _WordList extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _WordRow extends StatelessWidget {
+  static const _pronunciation = PronunciationService();
+
   final WordEntry entry;
   final AppColors colors;
   final void Function(String)? onMarkKnown;
@@ -274,6 +277,14 @@ class _WordRow extends StatelessWidget {
                       fontSize: 17,
                       fontWeight: FontWeight.w600,
                       color: colors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    _pronunciation.getPair(entry.word).modernGreek,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                      color: colors.textSecondary,
                     ),
                   ),
                   if (entry.translation.isNotEmpty)

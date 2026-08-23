@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/pronunciation_service.dart';
 import '../../../data/services/vocabulary_service.dart';
 import '../../../domain/entities/word_entry.dart';
 import '../../providers/language_provider.dart';
@@ -126,6 +127,8 @@ class _ToughestWordsScreenState extends ConsumerState<ToughestWordsScreen> {
 }
 
 class _ToughWordTile extends StatelessWidget {
+  static const _pronunciation = PronunciationService();
+
   final int rank;
   final WordEntry entry;
   final AppColors colors;
@@ -171,6 +174,16 @@ class _ToughWordTile extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       color: colors.textPrimary,
                     ),
+                  ),
+                  Text(
+                    _pronunciation.getPair(entry.word).modernGreek,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: colors.textSecondary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   if (entry.translation.isNotEmpty)
                     Text(

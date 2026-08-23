@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/utils/text_normalizer.dart';
 import '../../data/services/morphology_service.dart';
+import '../../data/services/pronunciation_service.dart';
 import '../../domain/entities/parsing_word.dart';
 import '../../domain/entities/verse.dart';
 import '../../domain/entities/verse_block.dart';
@@ -140,6 +141,8 @@ class _VerseBlockViewState extends ConsumerState<VerseBlockView> {
 // ---------------------------------------------------------------------------
 
 class _VerseRow extends StatelessWidget {
+  static const _pronunciation = PronunciationService();
+
   final Verse verse;
   final Set<String> knownWords;
   final Map<String, dynamic> entries; // word -> WordEntry
@@ -286,6 +289,14 @@ class _VerseRow extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11 * textScale,
                 color: colors.textSecondary,
+              ),
+            ),
+            Text(
+              _pronunciation.getPair(token).modernGreek,
+              style: TextStyle(
+                fontSize: 9.5 * textScale,
+                fontStyle: FontStyle.italic,
+                color: colors.textSecondary.withValues(alpha: 0.75),
               ),
             ),
             Text(

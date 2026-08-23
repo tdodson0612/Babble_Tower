@@ -31,19 +31,43 @@ class PronunciationService {
 
   static const _koine = KoinePhoneticService();
 
+  // Matches any character that is NOT a Greek letter or combining
+  // diacritic -- i.e. punctuation, digits, whitespace, or anything
+  // else that shouldn't appear in a pronunciation string. Same
+  // Unicode ranges as TextNormalizer's stripper, but tighter (no
+  // Latin/apostrophe passthrough, since a pronunciation string should
+  // never contain those). Kept as a static field, not const, since
+  // Dart doesn't allow const RegExp construction from a raw string
+  // this way at the top level of a const-constructible class.
+  static final _stripNonGreek = RegExp(r'[^\u0370-\u03FF\u1F00-\u1FFF\u0300-\u036F]');
+
   /// Returns both pronunciation forms for [greekWord].
   /// Modern Greek romanization is a simple lowercase strip of the word
   /// (TTS handles the actual phonetics; this is just the display label).
   /// Koine is generated deterministically by KoinePhoneticService — this
   /// on-screen phonetic spelling is unaffected by the audio decision
   /// above.
+  ///
+  /// [greekWord] is stripped of anything that isn't a Greek letter
+  /// before either pronunciation form is generated. Callers throughout
+  /// the app pass raw verse tokens (which often carry trailing/leading
+  /// punctuation straight from the source text, e.g. "λόγος," or
+  /// "(καὶ") rather than pre-normalized words -- without this strip,
+  /// both _modernRomanize and KoinePhoneticService.generateKoinePhonetic
+  /// pass any unmapped character straight through into their output
+  /// (their `map[ch] ?? ch` fallback), so a raw token would produce a
+  /// pronunciation string with a stray comma or parenthesis stuck onto
+  /// it. Stripping once here, at the single shared entry point, fixes
+  /// this for every call site in the app without needing each caller
+  /// to remember to pre-normalize its input.
   PronunciationPair getPair(String greekWord) {
-    if (greekWord.isEmpty) {
+    final cleaned = greekWord.replaceAll(_stripNonGreek, '');
+    if (cleaned.isEmpty) {
       return const PronunciationPair(modernGreek: '', koineGreek: '');
     }
 
-    final modern = _modernRomanize(greekWord);
-    final koine = _koine.generateKoinePhonetic(greekWord);
+    final modern = _modernRomanize(cleaned);
+    final koine = _koine.generateKoinePhonetic(cleaned);
 
     return PronunciationPair(
       modernGreek: modern,
@@ -112,4 +136,4 @@ class PronunciationService {
     };
     return d[ch] ?? ch;
   }
-} 
+}

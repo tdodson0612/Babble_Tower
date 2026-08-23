@@ -3,6 +3,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/pronunciation_service.dart';
 import '../quiz_models.dart';
 import '../quiz_question.dart';
 
@@ -74,6 +75,8 @@ class McQuestionView extends StatefulWidget {
 }
 
 class _McQuestionViewState extends State<McQuestionView> {
+  static const _pronunciation = PronunciationService();
+
   int? _selected;
 
   void _select(int index) {
@@ -100,6 +103,18 @@ class _McQuestionViewState extends State<McQuestionView> {
           ),
           textAlign: TextAlign.center,
         ),
+        if (widget.promptIsGreek) ...[
+          const SizedBox(height: 4),
+          Text(
+            _pronunciation.getPair(widget.prompt).modernGreek,
+            style: TextStyle(
+              fontSize: 15,
+              fontStyle: FontStyle.italic,
+              color: colors.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
         const SizedBox(height: 32),
         ...List.generate(widget.options.length, (i) {
           final isSelected = _selected == i;
@@ -129,14 +144,29 @@ class _McQuestionViewState extends State<McQuestionView> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: Text(
-                  widget.options[i],
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: colors.textPrimary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  textAlign: TextAlign.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.options[i],
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (!widget.promptIsGreek)
+                      Text(
+                        _pronunciation.getPair(widget.options[i]).modernGreek,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                          color: colors.textSecondary,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                  ],
                 ),
               ),
             ),
