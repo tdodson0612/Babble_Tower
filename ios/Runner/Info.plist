@@ -28,6 +28,8 @@
 <true/>
 <key>NSCameraUsageDescription</key>
 <string>Babble Tower uses the camera only when you choose to take a photo for a personal image.</string>
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Babble Tower does not use your location. This permission is required by a system library.</string>
 <key>NSPhotoLibraryUsageDescription</key>
 <string>Babble Tower uses your photo library only when you choose to add a personal image.</string>
 <key>UIApplicationSceneManifest</key>
