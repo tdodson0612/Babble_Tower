@@ -72,6 +72,73 @@ class AppColors extends ThemeExtension<AppColors> {
     border: Color(0xFF332F26),
   );
 
+  // ── Unlockable themes ──────────────────────────────────────────────────
+  // Cosmetic-only alternate palettes, gated behind RewardsService's
+  // variable-reward "mystery box" unlocks (see rewards_service.dart) —
+  // not tied to light/dark mode, purely a collectible reward. Each
+  // keeps the same text/border relationships as `light` for contrast
+  // safety, only primary/secondary/accent/highlight actually shift.
+  static const ocean = AppColors(
+    background: Color(0xFFF3F8FA),
+    surface: Color(0xFFFFFFFF),
+    primary: Color(0xFF0F6E8C),
+    secondary: Color(0xFF8FD3E8),
+    accent: Color(0xFF1FA598),
+    textPrimary: Color(0xFF13262B),
+    textSecondary: Color(0xFF5A7379),
+    highlight: Color(0xFFD5F0F5),
+    border: Color(0xFFD9E7EA),
+  );
+
+  static const sunset = AppColors(
+    background: Color(0xFFFBF4EF),
+    surface: Color(0xFFFFFFFF),
+    primary: Color(0xFFCC5B32),
+    secondary: Color(0xFFFFC38B),
+    accent: Color(0xFFE0447B),
+    textPrimary: Color(0xFF2E1B14),
+    textSecondary: Color(0xFF7A655C),
+    highlight: Color(0xFFFFE3CE),
+    border: Color(0xFFEFDCD1),
+  );
+
+  static const royal = AppColors(
+    background: Color(0xFFF6F3FA),
+    surface: Color(0xFFFFFFFF),
+    primary: Color(0xFF5B3E96),
+    secondary: Color(0xFFC9B6F2),
+    accent: Color(0xFFC9A227),
+    textPrimary: Color(0xFF221A33),
+    textSecondary: Color(0xFF6E6580),
+    highlight: Color(0xFFE9E1F7),
+    border: Color(0xFFE0D8EC),
+  );
+
+  static const midnight = AppColors(
+    background: Color(0xFF0B0E17),
+    surface: Color(0xFF161B29),
+    primary: Color(0xFF7C93FF),
+    secondary: Color(0xFF9AD8FF),
+    accent: Color(0xFFC0C7D9),
+    textPrimary: Color(0xFFEDEFF7),
+    textSecondary: Color(0xFF9AA1B8),
+    highlight: Color(0xFF232B45),
+    border: Color(0xFF262C40),
+  );
+
+  /// Every unlockable theme, keyed by the same id RewardsService uses
+  /// in its persisted "unlocked theme ids" set. Deliberately excludes
+  /// `light`/`dark` — those are the always-available base modes, not
+  /// unlockable rewards.
+  static const Map<String, AppColors> unlockableThemes = {
+    'ocean': ocean,
+    'sunset': sunset,
+    'royal': royal,
+    'midnight': midnight,
+  };
+
+  static AppColors? byUnlockableId(String id) => unlockableThemes[id];
+
   @override
   AppColors copyWith({
     Color? background,

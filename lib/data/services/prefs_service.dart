@@ -119,6 +119,8 @@ class PrefsService {
   //   - Longest streak is updated whenever current exceeds it.
 
   static int get currentStreak  => _prefs.getInt(_kStreakCount)   ?? 0;
+  static bool get hasSessionToday =>
+      _lastDateStr == _formatDate(_dateOnly(DateTime.now()));
   static int get longestStreak  => _prefs.getInt(_kStreakLongest) ?? 0;
   static String? get _lastDateStr => _prefs.getString(_kStreakLastDate);
 

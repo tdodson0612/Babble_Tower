@@ -10,6 +10,7 @@ import '../../../data/services/notification_service.dart';
 import '../../../domain/usecases/backup_usecase.dart';
 import '../../../domain/tutorial/example_home_tour_script.dart';
 import '../../../domain/usecases/migrate_corrupted_vocab_usecase.dart';
+import '../../providers/theme_provider.dart';
 import '../../providers/tutorial_provider.dart';
 import '../../providers/language_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -53,6 +54,12 @@ class SettingsScreen extends ConsumerWidget {
             onChanged: (_) =>
                 ref.read(settingsProvider.notifier).toggleDarkMode(),
           ),
+          const SizedBox(height: 16),
+          // Unlockable cosmetic color themes — see RewardsService's
+          // mystery-box unlocks. Only shown once at least one theme has
+          // been unlocked, so a brand-new player doesn't see an empty
+          // picker before they've earned anything.
+          const _ThemePickerSection(),
           const SizedBox(height: 24),
 
           // ── Reading ────────────────────────────────────────────────────
@@ -161,6 +168,143 @@ class SettingsScreen extends ConsumerWidget {
             title: 'Version',
             subtitle: '1.0.0',
             colors: colors,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Theme picker — unlockable cosmetic color themes (see RewardsService)
+// ---------------------------------------------------------------------------
+
+class _ThemePickerSection extends ConsumerWidget {
+  const _ThemePickerSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.colors;
+    final themeState = ref.watch(themeProvider);
+
+    if (themeState.unlockedThemeIds.isEmpty) {
+      // Nothing unlocked yet — don't show an empty/confusing picker.
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Unlocked themes',
+            style: TextStyle(fontSize: 15, color: colors.textPrimary),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Earned from mystery box rewards',
+            style: TextStyle(fontSize: 13, color: colors.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _ThemeSwatch(
+                label: 'Default',
+                selected: themeState.activeThemeId == null,
+                previewColors: [colors.primary, colors.secondary, colors.accent],
+                onTap: () => ref.read(themeProvider.notifier).setTheme(null),
+                colors: colors,
+              ),
+              const SizedBox(width: 10),
+              for (final id in themeState.unlockedThemeIds) ...[
+                Builder(builder: (context) {
+                  final theme = AppColors.byUnlockableId(id);
+                  if (theme == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: _ThemeSwatch(
+                      label: _themeLabel(id),
+                      selected: themeState.activeThemeId == id,
+                      previewColors: [theme.primary, theme.secondary, theme.accent],
+                      onTap: () =>
+                          ref.read(themeProvider.notifier).setTheme(id),
+                      colors: colors,
+                    ),
+                  );
+                }),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _themeLabel(String id) {
+    switch (id) {
+      case 'ocean':
+        return 'Ocean';
+      case 'sunset':
+        return 'Sunset';
+      case 'royal':
+        return 'Royal';
+      case 'midnight':
+        return 'Midnight';
+      default:
+        return id;
+    }
+  }
+}
+
+class _ThemeSwatch extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final List<Color> previewColors;
+  final VoidCallback onTap;
+  final AppColors colors;
+
+  const _ThemeSwatch({
+    required this.label,
+    required this.selected,
+    required this.previewColors,
+    required this.onTap,
+    required this.colors,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected ? colors.primary : colors.border,
+                width: selected ? 2.5 : 1,
+              ),
+            ),
+            padding: const EdgeInsets.all(4),
+            child: ClipOval(
+              child: Column(
+                children: previewColors
+                    .map((c) => Expanded(child: Container(color: c)))
+                    .toList(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10.5,
+              color: selected ? colors.primary : colors.textSecondary,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+            ),
           ),
         ],
       ),

@@ -1,10 +1,12 @@
 // lib/presentation/screens/review/review_session_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../data/services/prefs_service.dart';
+import '../../../data/services/rewards_service.dart';
 import '../../../data/services/sound_service.dart';
 import '../../../domain/quiz/quiz_models.dart';
 import '../../../domain/quiz/quiz_question.dart';
@@ -12,6 +14,8 @@ import '../../../domain/quiz/review_session_engine.dart';
 import '../../../domain/usecases/spaced_repetition_usecase.dart';
 import '../../providers/language_provider.dart';
 import '../../providers/vocabulary_provider.dart';
+import '../../widgets/combo_badge_overlay.dart';
+import '../../widgets/mystery_box_overlay.dart';
 
 /// Spaced-repetition review session — pulls due words from ACROSS the
 /// whole vocabulary (see SpacedRepetitionUseCase), not a single verse.
@@ -42,6 +46,9 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
   bool? _lastAnswerCorrect;
   String _lastAnswerWord = '';
   String _lastAnswerTranslation = '';
+
+  final _rewards = RewardsService();
+  int _comboCount = 0;
 
   @override
   void initState() {
@@ -118,8 +125,18 @@ class _ReviewSessionScreenState extends ConsumerState<ReviewSessionScreen> {
     engine.submitAnswer(question, correct);
 
     if (correct) {
+      _comboCount++;
+      HapticFeedback.mediumImpact();
       SoundService.instance.playCorrect();
+      showComboBadge(context, _comboCount, context.colors);
+      _rewards.rollForCorrectAnswer().then((reward) {
+        if (reward.isMysteryBox && mounted) {
+          showMysteryBoxReveal(context, reward, context.colors);
+        }
+      });
     } else {
+      _comboCount = 0;
+      HapticFeedback.lightImpact();
       SoundService.instance.playIncorrect();
     }
 

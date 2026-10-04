@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/pronunciation_service.dart';
 import '../../../domain/usecases/word_list_usecase.dart';
 
 /// Navigation arguments for the /word_list route.
@@ -141,43 +142,93 @@ class _HeaderRow extends StatelessWidget {
   }
 }
 
-class _WordListRowTile extends StatelessWidget {
+class _WordListRowTile extends StatefulWidget {
   final WordListRow row;
   const _WordListRowTile({required this.row});
 
   @override
+  State<_WordListRowTile> createState() => _WordListRowTileState();
+}
+
+class _WordListRowTileState extends State<_WordListRowTile> {
+  static final _pronunciation = PronunciationService();
+  bool _speaking = false;
+
+  Future<void> _toggleSpeak() async {
+    if (_speaking) {
+      await _pronunciation.stop();
+      if (mounted) setState(() => _speaking = false);
+      return;
+    }
+    setState(() => _speaking = true);
+    await _pronunciation.speak(widget.row.greek);
+    if (mounted) setState(() => _speaking = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final row = widget.row;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Greek word + pronunciation
+          // Greek word + pronunciation — entire block is tappable and
+          // plays the modern-Greek pronunciation audio (same TTS voice
+          // used everywhere else in the app — see PronunciationService
+          // .speak's own doc for why Koine-specific audio isn't
+          // offered here or anywhere in the app).
           SizedBox(
             width: 96,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  row.greek,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                if (row.pronunciation.isNotEmpty)
-                  Text(
-                    row.pronunciation,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colors.textSecondary,
-                      fontStyle: FontStyle.italic,
+            child: InkWell(
+              onTap: _toggleSpeak,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _speaking
+                              ? Icons.stop_circle_rounded
+                              : Icons.volume_up_rounded,
+                          size: 15,
+                          color: _speaking
+                              ? colors.primary
+                              : colors.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            row.greek,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-              ],
+                    if (row.pronunciation.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 19),
+                        child: Text(
+                          row.pronunciation,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colors.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 12),

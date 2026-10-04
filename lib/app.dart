@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/constants/app_colors.dart';
 import 'data/services/notification_service.dart';
 import 'presentation/providers/settings_provider.dart';
+import 'presentation/providers/theme_provider.dart';
 import 'presentation/providers/user_profile_provider.dart';
 import 'presentation/providers/tutorial_provider.dart';
+import 'presentation/screens/achievements/achievements_screen.dart';
 import 'presentation/screens/progress/readability_screen.dart';
 import 'presentation/screens/progress/progress_dashboard_screen.dart';
 import 'presentation/screens/onboarding/alphabet_grid_screen.dart';
@@ -29,6 +31,9 @@ class BabbleTowerApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final darkMode = ref.watch(settingsProvider.select((s) => s.darkMode));
+    final activeThemeColors = ref.watch(themeProvider).activeColors;
+    final lightColors = activeThemeColors ?? AppColors.light;
+    final darkColors  = activeThemeColors ?? AppColors.dark;
 
     return MaterialApp(
       title: 'Babble Tower',
@@ -36,24 +41,24 @@ class BabbleTowerApp extends ConsumerWidget {
       navigatorKey: tutorialNavigatorKey,
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
-        scaffoldBackgroundColor: AppColors.light.background,
+        scaffoldBackgroundColor: lightColors.background,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.light.primary,
-          secondary: AppColors.light.secondary,
+          seedColor: lightColors.primary,
+          secondary: lightColors.secondary,
           brightness: Brightness.light,
         ),
         useMaterial3: true,
-        extensions: const [AppColors.light],
+        extensions: [lightColors],
       ),
       darkTheme: ThemeData(
-        scaffoldBackgroundColor: AppColors.dark.background,
+        scaffoldBackgroundColor: darkColors.background,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.dark.primary,
-          secondary: AppColors.dark.secondary,
+          seedColor: darkColors.primary,
+          secondary: darkColors.secondary,
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
-        extensions: const [AppColors.dark],
+        extensions: [darkColors],
       ),
       initialRoute: '/',
       onGenerateRoute: (settings) {
@@ -152,6 +157,10 @@ class BabbleTowerApp extends ConsumerWidget {
           case '/settings':
             return MaterialPageRoute(
               builder: (_) => const SettingsScreen(),
+            );
+          case '/achievements':
+            return MaterialPageRoute(
+              builder: (_) => const AchievementsScreen(),
             );
           default:
             return MaterialPageRoute(

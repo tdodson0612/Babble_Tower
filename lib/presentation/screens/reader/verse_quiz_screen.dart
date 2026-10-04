@@ -1,12 +1,14 @@
 // lib/presentation/screens/reader/verse_quiz_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/utils/text_normalizer.dart';
 import '../../../data/services/morphology_service.dart';
 import '../../../data/services/prefs_service.dart';
+import '../../../data/services/rewards_service.dart';
 import '../../../data/services/sound_service.dart';
 import '../../../data/services/pronunciation_service.dart';
 import '../../../domain/entities/parsing_word.dart';
@@ -16,6 +18,8 @@ import '../../../domain/quiz/quiz_question.dart';
 import '../../../domain/usecases/track_parsing_progress_usecase.dart';
 import '../../../domain/usecases/track_verse_progress_usecase.dart';
 import '../../providers/vocabulary_provider.dart';
+import '../../widgets/combo_badge_overlay.dart';
+import '../../widgets/mystery_box_overlay.dart';
 
 /// Arguments passed via Navigator when pushing /verse_quiz.
 class VerseQuizArgs {
@@ -67,6 +71,9 @@ class _VerseQuizScreenState extends ConsumerState<VerseQuizScreen> {
   /// comment. QuizEngine treats an empty list exactly like no morphology
   /// data was ever passed.
   List<ParsingWord> _morphology = const [];
+
+  final _rewards = RewardsService();
+  int _comboCount = 0;
 
   QuizEngine? _engine;
   QuizQuestion? _currentQuestion;
@@ -214,11 +221,22 @@ class _VerseQuizScreenState extends ConsumerState<VerseQuizScreen> {
     final question = _currentQuestion!;
     engine.submitAnswer(question, correct);
 
-    // Sound feedback — fires immediately, before feedback banner appears.
-    // No-ops silently if audio assets aren't present yet.
+    // Haptic + sound feedback — fires immediately, before feedback
+    // banner appears. Haptics are a built-in Flutter API (no asset
+    // needed); sound no-ops silently if audio assets aren't present.
     if (correct) {
+      _comboCount++;
+      HapticFeedback.mediumImpact();
       SoundService.instance.playCorrect();
+      showComboBadge(context, _comboCount, context.colors);
+      _rewards.rollForCorrectAnswer().then((reward) {
+        if (reward.isMysteryBox && mounted) {
+          showMysteryBoxReveal(context, reward, context.colors);
+        }
+      });
     } else {
+      _comboCount = 0;
+      HapticFeedback.lightImpact();
       SoundService.instance.playIncorrect();
     }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/utils/text_normalizer.dart';
+import '../../data/services/kjv_alignment_service.dart';
 import '../../data/services/morphology_service.dart';
 import '../../data/services/pronunciation_service.dart';
 import '../../domain/entities/parsing_word.dart';
@@ -47,16 +48,24 @@ class _VerseBlockViewState extends ConsumerState<VerseBlockView> {
   final Set<int> _revealedVerses = {};
 
   final _morphologyService = MorphologyService();
+  final _kjvAlignmentService = KjvAlignmentService();
 
   /// verse number -> (surface word -> ParsingWord). Rebuilt whenever the
   /// displayed block changes. Empty map for any verse until its load
   /// completes, or forever if it has no aligned morphology data.
   Map<int, Map<String, ParsingWord>> _morphologyByVerse = {};
 
+  /// verse number -> per-word-position KJV rendering list, same
+  /// tokenization/index convention as _buildTranslationWrap and
+  /// _buildWordWrap's split(' '). Empty list for any verse until its
+  /// load completes, or forever if this verse has no alignment data.
+  Map<int, List<String>> _kjvAlignmentByVerse = {};
+
   @override
   void initState() {
     super.initState();
     _loadMorphology();
+    _loadKjvAlignment();
   }
 
   @override
@@ -66,8 +75,12 @@ class _VerseBlockViewState extends ConsumerState<VerseBlockView> {
       // New verse block — drop stale data immediately rather than
       // showing the previous verse's word families while the new
       // block's data loads.
-      setState(() => _morphologyByVerse = {});
+      setState(() {
+        _morphologyByVerse = {};
+        _kjvAlignmentByVerse = {};
+      });
       _loadMorphology();
+      _loadKjvAlignment();
     }
   }
 
@@ -92,6 +105,24 @@ class _VerseBlockViewState extends ConsumerState<VerseBlockView> {
     setState(() => _morphologyByVerse = result);
   }
 
+  Future<void> _loadKjvAlignment() async {
+    final requestedBlockIndex = widget.block.blockIndex;
+    final result = <int, List<String>>{};
+
+    for (final verse in widget.block.verses) {
+      final aligned = await _kjvAlignmentService.forVerse(
+        widget.book,
+        widget.chapter.toString(),
+        verse.number,
+      );
+      result[verse.number] = aligned ?? const [];
+    }
+
+    if (!mounted) return;
+    if (requestedBlockIndex != widget.block.blockIndex) return;
+    setState(() => _kjvAlignmentByVerse = result);
+  }
+
   @override
   Widget build(BuildContext context) {
     final knownWords = ref.watch(
@@ -112,6 +143,8 @@ class _VerseBlockViewState extends ConsumerState<VerseBlockView> {
       itemBuilder: (context, index) {
         final verse = widget.block.verses[index];
         return _VerseRow(
+          book: widget.book,
+          chapter: widget.chapter,
           verse: verse,
           knownWords: knownWords,
           entries: entries,
@@ -120,6 +153,7 @@ class _VerseBlockViewState extends ConsumerState<VerseBlockView> {
           onToggleReveal: () => _toggleReveal(verse.number),
           morphologyByWord:
               _morphologyByVerse[verse.number] ?? const {},
+          kjvAlignment: _kjvAlignmentByVerse[verse.number] ?? const [],
         );
       },
     );
@@ -143,6 +177,8 @@ class _VerseBlockViewState extends ConsumerState<VerseBlockView> {
 class _VerseRow extends StatelessWidget {
   static const _pronunciation = PronunciationService();
 
+  final String book;
+  final int chapter;
   final Verse verse;
   final Set<String> knownWords;
   final Map<String, dynamic> entries; // word -> WordEntry
@@ -155,7 +191,16 @@ class _VerseRow extends StatelessWidget {
   /// verse with no aligned morphology data.
   final Map<String, ParsingWord> morphologyByWord;
 
+  /// Per-word-position KJV rendering for this verse, same index
+  /// convention as the split(' ') tokenization used everywhere else in
+  /// this file. Empty list if no alignment data is available for this
+  /// verse; an individual entry may also be '' for a word with no
+  /// match (see KjvAlignmentService's doc comment).
+  final List<String> kjvAlignment;
+
   const _VerseRow({
+    required this.book,
+    required this.chapter,
     required this.verse,
     required this.knownWords,
     required this.entries,
@@ -163,6 +208,7 @@ class _VerseRow extends StatelessWidget {
     required this.revealed,
     required this.onToggleReveal,
     required this.morphologyByWord,
+    required this.kjvAlignment,
   });
 
   @override
@@ -249,7 +295,9 @@ class _VerseRow extends StatelessWidget {
     return Wrap(
       spacing: 4,
       runSpacing: 0,
-      children: tokens.map((token) {
+      children: tokens.asMap().entries.map((entry) {
+        final wordIndex = entry.key;
+        final token = entry.value;
         // Use TextNormalizer to match the same key TappableWord uses internally.
         final normalized = TextNormalizer.normalizeWord(token);
         return TappableWord(
@@ -261,9 +309,35 @@ class _VerseRow extends StatelessWidget {
           // it tokenized differently). TappableWord treats null exactly
           // like "no family data available" — no different code path.
           lemma: morphologyByWord[normalized]?.lemma,
+          // Verse location + this token's position, so WordDetailSheet
+          // can look up its per-occurrence KJV rendering via
+          // KjvAlignmentService. wordIndex here MUST match the same
+          // split(' ') tokenization build_kjv_alignment_v2.py used to
+          // generate that data, or lookups silently land on the wrong
+          // word.
+          book: book,
+          chapter: chapter.toString(),
+          verseNumber: verse.number,
+          wordIndex: wordIndex,
         );
       }).toList(),
     );
+  }
+
+  /// Combines the dictionary translation with the per-occurrence KJV
+  /// rendering into ONE displayed string, e.g. "a written book, roll,
+  /// volume, or The book" — rather than showing the KJV word as a
+  /// separately labeled line. Skips the KJV word entirely if it's
+  /// empty, or already effectively present in the dictionary
+  /// translation (case-insensitive substring check), so the same word
+  /// never appears twice.
+  static String? _mergeTranslation(String? translation, String kjvWord) {
+    if (kjvWord.isEmpty) return translation;
+    final alreadyPresent = translation != null &&
+        translation.toLowerCase().contains(kjvWord.toLowerCase());
+    if (alreadyPresent) return translation;
+    if (translation == null || translation.isEmpty) return kjvWord;
+    return '$translation, or $kjvWord';
   }
 
   Widget _buildTranslationWrap(AppColors colors) {
@@ -272,13 +346,29 @@ class _VerseRow extends StatelessWidget {
     return Wrap(
       spacing: 12,
       runSpacing: 8,
-      children: tokens.map((token) {
+      children: tokens.asMap().entries.map((tokenEntry) {
+        final wordIndex = tokenEntry.key;
+        final token = tokenEntry.value;
         final normalized = TextNormalizer.normalizeWord(token);
         final entry = entries[normalized];
         final translation =
             (entry?.translation as String?)?.isNotEmpty == true
                 ? entry.translation as String
                 : null;
+        // Second gloss: the real, per-occurrence KJV rendering for
+        // THIS word in THIS verse (as opposed to `translation` above,
+        // which is one shared dictionary-level gloss regardless of
+        // context) — see KjvAlignmentService's doc comment for
+        // provenance and honest coverage numbers (~78% of
+        // occurrences; the rest are legitimately blank, not guessed).
+        // Folded directly into the same translation line as an extra
+        // comma-separated item (not a separate labeled row) — skipped
+        // if it's empty, or already effectively present in the
+        // dictionary translation.
+        final kjvWord = wordIndex < kjvAlignment.length
+            ? kjvAlignment[wordIndex]
+            : '';
+        final displayTranslation = _mergeTranslation(translation, kjvWord);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -300,14 +390,14 @@ class _VerseRow extends StatelessWidget {
               ),
             ),
             Text(
-              translation ?? '—',
+              displayTranslation ?? '—',
               style: TextStyle(
                 fontSize: 13 * textScale,
                 fontWeight: FontWeight.w600,
-                color: translation != null
+                color: displayTranslation != null
                     ? colors.primary
                     : colors.border,
-                fontStyle: translation != null
+                fontStyle: displayTranslation != null
                     ? FontStyle.normal
                     : FontStyle.italic,
               ),

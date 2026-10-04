@@ -1,6 +1,6 @@
 name: babble_tower
 description: A language learning app teaching English speakers to read Koine Greek through the four Gospels.
-version: 1.0.0+18
+version: 1.0.0+21
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -60,6 +60,7 @@ flutter:
     - assets/morphology/
     - assets/word_families/
     - assets/mascot/
+    - assets/alignment/kjv_word_alignment.json
 
 flutter_launcher_icons:
   android: true

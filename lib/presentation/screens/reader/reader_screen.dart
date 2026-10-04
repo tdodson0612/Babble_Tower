@@ -16,6 +16,7 @@ import '../../../domain/usecases/track_verse_progress_usecase.dart';
 import '../../providers/bible_provider.dart';
 import '../../providers/language_provider.dart';
 import '../../providers/vocabulary_provider.dart';
+import '../../widgets/milestone_celebration_overlay.dart';
 import '../../widgets/verse_block_view.dart';
 import 'grammar_lesson_screen.dart';
 import 'verse_quiz_screen.dart';
@@ -251,6 +252,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final langState  = ref.read(languageProvider);
     final nextBlock  = bibleState.currentBlockIndex + 1;
 
+    // Detect milestone BEFORE advancing — bibleState here still
+    // reflects the chapter/block just finished.
+    final isLastBlockInChapter = !bibleState.hasNextBlock;
+    final isLastChapterInBook =
+        bibleState.selectedChapter == bibleState.selectedBookChapterCount;
+
     await _progress.unlockBlock(
       pairKey:    langState.pairKey,
       book:       bibleState.selectedBook!,
@@ -262,6 +269,25 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     _loadVocabForCurrentBlock();
     await _savePosition();
     if (mounted) setState(() {});
+
+    if (isLastBlockInChapter && mounted) {
+      if (isLastChapterInBook) {
+        await showMilestoneCelebration(
+          context,
+          tier: MilestoneTier.book,
+          bookName: bibleState.selectedBook!,
+          colors: context.colors,
+        );
+      } else {
+        await showMilestoneCelebration(
+          context,
+          tier: MilestoneTier.chapter,
+          bookName: bibleState.selectedBook!,
+          chapterNumber: bibleState.selectedChapter,
+          colors: context.colors,
+        );
+      }
+    }
   }
 
   void _goPrev() {

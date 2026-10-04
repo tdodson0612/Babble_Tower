@@ -1,12 +1,16 @@
 // lib/presentation/screens/onboarding/alphabet_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/alphabet_data.dart';
+import '../../../data/services/rewards_service.dart';
 import '../../../data/services/sound_service.dart';
 import '../../../domain/alphabet/alphabet_quiz_engine.dart';
 import '../../providers/user_profile_provider.dart';
+import '../../widgets/combo_badge_overlay.dart';
+import '../../widgets/mystery_box_overlay.dart';
 
 /// Teaches the Greek alphabet, 5 letters at a time. This is a mandatory
 /// first step for every user — Babble Tower has a single fixed pair
@@ -32,6 +36,9 @@ class AlphabetScreen extends ConsumerStatefulWidget {
 
 class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
   final _engine = AlphabetQuizEngine();
+
+  final _rewards = RewardsService();
+  int _comboCount = 0;
 
   // Teach-phase state
   bool _revealed = false;
@@ -70,8 +77,18 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
     });
 
     if (correct) {
+      _comboCount++;
+      HapticFeedback.mediumImpact();
       SoundService.instance.playCorrect();
+      showComboBadge(context, _comboCount, context.colors);
+      _rewards.rollForCorrectAnswer().then((reward) {
+        if (reward.isMysteryBox && mounted) {
+          showMysteryBoxReveal(context, reward, context.colors);
+        }
+      });
     } else {
+      _comboCount = 0;
+      HapticFeedback.lightImpact();
       SoundService.instance.playIncorrect();
     }
 

@@ -1,12 +1,16 @@
 // lib/presentation/screens/reader/grammar_lesson_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../data/services/rewards_service.dart';
 import '../../../data/services/sound_service.dart';
 import '../../../data/services/pronunciation_service.dart';
 import '../../../domain/entities/parsing_word.dart';
 import '../../../domain/grammar/grammar_lesson_engine.dart';
 import '../../../domain/usecases/track_grammar_lesson_progress_usecase.dart';
+import '../../widgets/combo_badge_overlay.dart';
+import '../../widgets/mystery_box_overlay.dart';
 
 /// Navigation arguments for the /grammar_lesson route.
 class GrammarLessonArgs {
@@ -40,6 +44,9 @@ class _GrammarLessonScreenState extends State<GrammarLessonScreen> {
   static const _progress = TrackGrammarLessonProgressUseCase();
   static const _pronunciation = PronunciationService();
   late final GrammarLessonEngine _engine;
+
+  final _rewards = RewardsService();
+  int _comboCount = 0;
 
   @override
   void initState() {
@@ -282,8 +289,18 @@ class _GrammarLessonScreenState extends State<GrammarLessonScreen> {
     final q = _engine.currentQuestion!;
     final correct = index == q.correctIndex;
     if (correct) {
+      _comboCount++;
+      HapticFeedback.mediumImpact();
       SoundService.instance.playCorrect();
+      showComboBadge(context, _comboCount, context.colors);
+      _rewards.rollForCorrectAnswer().then((reward) {
+        if (reward.isMysteryBox && mounted) {
+          showMysteryBoxReveal(context, reward, context.colors);
+        }
+      });
     } else {
+      _comboCount = 0;
+      HapticFeedback.lightImpact();
       SoundService.instance.playIncorrect();
     }
     setState(() => _engine.submitQuizAnswer(index));

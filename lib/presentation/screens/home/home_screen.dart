@@ -116,6 +116,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildSubtitle(colors),
+              const SizedBox(height: 16),
+              const _HomeStreakBanner(),
+              const SizedBox(height: 10),
+              const _AchievementsEntryCard(),
               const SizedBox(height: 20),
               if (_resumeBook != null) ...[
                 _ContinueCard(
@@ -293,6 +297,149 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Streak banner — the FIRST thing seen on every app open, by design.
+// Reads directly from PrefsService (sync, already in memory) — same
+// data source as the Progress Dashboard's streak card, just given the
+// visual/psychological treatment that card intentionally doesn't have.
+// ---------------------------------------------------------------------------
+
+class _HomeStreakBanner extends StatelessWidget {
+  const _HomeStreakBanner();
+
+  Color _flameColor(AppColors colors, int streak) {
+    if (streak >= 30) return const Color(0xFF7B61FF); // "on fire" violet
+    if (streak >= 7) return const Color(0xFFFF5A36);  // deep orange-red
+    if (streak >= 1) return const Color(0xFFFF9F1C);  // warm orange
+    return colors.textSecondary.withValues(alpha: 0.4); // unlit / grey
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final streak = PrefsService.currentStreak;
+    final atRisk = streak > 0 && !PrefsService.hasSessionToday;
+    final flameColor = _flameColor(colors, streak);
+
+    String headline;
+    String subtext;
+    if (streak == 0) {
+      headline = 'Start your streak today';
+      subtext = 'Finish one quiz to begin';
+    } else if (atRisk) {
+      headline = '$streak day${streak == 1 ? '' : 's'} — keep it going!';
+      subtext = "You haven't studied today yet";
+    } else {
+      headline = '$streak day${streak == 1 ? '' : 's'} in a row';
+      subtext = 'Come back tomorrow to keep it up';
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: atRisk ? flameColor : colors.border,
+          width: atRisk ? 1.5 : 1,
+        ),
+        boxShadow: atRisk
+            ? [
+                BoxShadow(
+                  color: flameColor.withValues(alpha: 0.25),
+                  blurRadius: 12,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: Row(
+        children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.9, end: 1.0),
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.elasticOut,
+            builder: (context, scale, child) =>
+                Transform.scale(scale: scale, child: child),
+            child: Icon(
+              Icons.local_fire_department_rounded,
+              color: flameColor,
+              size: 34,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  headline,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtext,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: atRisk ? flameColor : colors.textSecondary,
+                    fontWeight: atRisk ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Achievements entry point
+// ---------------------------------------------------------------------------
+
+class _AchievementsEntryCard extends StatelessWidget {
+  const _AchievementsEntryCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return GestureDetector(
+      onTap: () => Navigator.pushNamed(context, '/achievements'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.emoji_events_rounded, color: colors.primary, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Achievements',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: colors.textPrimary,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: colors.textSecondary, size: 20),
+          ],
         ),
       ),
     );

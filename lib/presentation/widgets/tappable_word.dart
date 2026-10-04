@@ -1,27 +1,4 @@
 // lib/presentation/widgets/tappable_word.dart
-//
-// RECONSTRUCTED, NOT RECOVERED. The original file was accidentally
-// deleted from disk and was never committed to git, so nothing of the
-// literal original survives anywhere I have access to. This is a
-// best-effort rebuild from: (a) how verse_block_view.dart actually
-// calls this widget (rawToken/isKnown/textScale/lemma), and (b) this
-// project's own handoff notes describing its behavior — a tap opens a
-// detail view showing the word's translation and BOTH pronunciation
-// forms (Modern Greek with audio, Koine as text-only display — see
-// pronunciation_service.dart's own doc comment for why Koine has no
-// audio), plus "✓ Got it" / "✗ Not yet" buttons that mark the word
-// known/unknown.
-//
-// DELIBERATELY OMITTED: the Word Family section. Past notes mention
-// TappableWord showing one when [lemma] is non-null, but I don't have
-// word_family_service.dart's or word_family.dart's real API, and
-// guessing at method names here risked introducing a second wave of
-// compile errors during an already-stressful recovery. Paste both of
-// those files and I'll add the section back correctly rather than
-// guessing.
-//
-// Exact spacing/colors/layout will likely differ from what you had
-// before, even though the core behavior should match.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,7 +6,10 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/supported_languages.dart';
 import '../../core/utils/text_normalizer.dart';
 import '../../data/services/dictionary_service.dart';
+import '../../data/services/kjv_alignment_service.dart';
 import '../../data/services/pronunciation_service.dart';
+import '../../data/services/word_family_service.dart';
+import '../../domain/entities/word_family.dart';
 import '../providers/vocabulary_provider.dart';
 
 class TappableWord extends StatelessWidget {
@@ -37,6 +17,10 @@ class TappableWord extends StatelessWidget {
   final bool isKnown;
   final double textScale;
   final String? lemma;
+  final String? book;
+  final String? chapter;
+  final int? verseNumber;
+  final int? wordIndex;
 
   const TappableWord({
     super.key,
@@ -44,6 +28,10 @@ class TappableWord extends StatelessWidget {
     required this.isKnown,
     required this.textScale,
     this.lemma,
+    this.book,
+    this.chapter,
+    this.verseNumber,
+    this.wordIndex,
   });
 
   @override
@@ -72,7 +60,14 @@ class TappableWord extends StatelessWidget {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => WordDetailSheet(rawToken: rawToken, lemma: lemma),
+      builder: (_) => WordDetailSheet(
+        rawToken: rawToken,
+        lemma: lemma,
+        book: book,
+        chapter: chapter,
+        verseNumber: verseNumber,
+        wordIndex: wordIndex,
+      ),
     );
   }
 }
@@ -80,11 +75,19 @@ class TappableWord extends StatelessWidget {
 class WordDetailSheet extends ConsumerStatefulWidget {
   final String rawToken;
   final String? lemma;
+  final String? book;
+  final String? chapter;
+  final int? verseNumber;
+  final int? wordIndex;
 
   const WordDetailSheet({
     super.key,
     required this.rawToken,
     required this.lemma,
+    this.book,
+    this.chapter,
+    this.verseNumber,
+    this.wordIndex,
   });
 
   @override
@@ -96,9 +99,13 @@ class _WordDetailSheetState extends ConsumerState<WordDetailSheet> {
   static final _dictionary = DictionaryService();
   // ignore: prefer_const_constructors
   static final _pronunciation = PronunciationService();
+  static final _kjvAlignment = KjvAlignmentService();
+  static final _wordFamily = WordFamilyService();
 
   late final String _normalized;
   String? _translation;
+  String _kjvRendering = '';
+  WordFamily? _family;
   bool _loading = true;
   bool _speaking = false;
 
@@ -114,9 +121,40 @@ class _WordDetailSheetState extends ConsumerState<WordDetailSheet> {
       AppLanguage.readingDictionaryKey, // 'el_en' — never pairKey here
       _normalized,
     );
+
+    // Per-occurrence KJV rendering — a SECOND, complementary gloss
+    // alongside the dictionary's single shared gloss above. Only
+    // available when this widget was given its verse location (book/
+    // chapter/verseNumber/wordIndex all non-null); silently absent
+    // otherwise rather than erroring, since this is a supplementary
+    // feature, not core functionality.
+    String kjv = '';
+    if (widget.book != null &&
+        widget.chapter != null &&
+        widget.verseNumber != null &&
+        widget.wordIndex != null) {
+      kjv = await _kjvAlignment.forWord(
+        widget.book!,
+        widget.chapter!,
+        widget.verseNumber!,
+        widget.wordIndex!,
+      );
+    }
+
+    // Word family (root/cognate relations) — only resolvable when we
+    // have a real lemma from morphology data; WordEntry.lemma is
+    // always empty, so widget.lemma is the only reliable source (see
+    // WordFamilyService's own doc comment).
+    WordFamily? family;
+    if (widget.lemma != null && widget.lemma!.isNotEmpty) {
+      family = await _wordFamily.lookup(widget.lemma!);
+    }
+
     if (!mounted) return;
     setState(() {
       _translation = entry?.gloss;
+      _kjvRendering = kjv;
+      _family = family;
       _loading = false;
     });
   }
@@ -140,6 +178,24 @@ class _WordDetailSheetState extends ConsumerState<WordDetailSheet> {
       await notifier.markUnknown(_normalized);
     }
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Combines the dictionary translation with the per-occurrence KJV
+  /// rendering into ONE displayed string, matching the same merge rule
+  /// used in verse_block_view.dart's "Show translation" row — no
+  /// separate "KJV:" label, just an extra comma-separated item, and
+  /// skipped if it's empty or already effectively present in the
+  /// dictionary translation.
+  String _mergedTranslationDisplay() {
+    final translation = _translation;
+    if (translation == null || translation.isEmpty) {
+      return _kjvRendering.isNotEmpty ? _kjvRendering : 'No translation found';
+    }
+    if (_kjvRendering.isEmpty) return translation;
+    final alreadyPresent =
+        translation.toLowerCase().contains(_kjvRendering.toLowerCase());
+    if (alreadyPresent) return translation;
+    return '$translation, or $_kjvRendering';
   }
 
   @override
@@ -239,13 +295,57 @@ class _WordDetailSheetState extends ConsumerState<WordDetailSheet> {
               Center(
                 child: CircularProgressIndicator(color: colors.primary),
               )
-            else
+            else ...[
               Text(
-                (_translation?.isNotEmpty ?? false)
-                    ? _translation!
-                    : 'No translation found',
+                _mergedTranslationDisplay(),
                 style: TextStyle(fontSize: 16, color: colors.textPrimary),
               ),
+
+              // Word Family section — root/cognate relations, only
+              // shown when this word resolved to a real lemma AND that
+              // lemma has recorded relations in the lexicon. See
+              // WordFamilyService's class doc for why this sometimes
+              // legitimately shows nothing even for a resolvable lemma
+              // (isolated roots, or genuine MorphGNT/Strong's citation
+              // spelling disagreements).
+              if (_family != null && _family!.hasRelations) ...[
+                const SizedBox(height: 18),
+                Divider(color: colors.border),
+                const SizedBox(height: 18),
+                Text(
+                  'Word Family',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${_family!.lemma} — ${_family!.gloss}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.textPrimary,
+                  ),
+                ),
+                if (_family!.derivesFrom.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'From: ${_family!.derivesFrom.join(', ')}',
+                    style: TextStyle(fontSize: 13, color: colors.textSecondary),
+                  ),
+                ],
+                if (_family!.derivedForms.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Related: ${_family!.derivedForms.join(', ')}',
+                    style: TextStyle(fontSize: 13, color: colors.textSecondary),
+                  ),
+                ],
+              ],
+            ],
 
             const SizedBox(height: 24),
             Row(
