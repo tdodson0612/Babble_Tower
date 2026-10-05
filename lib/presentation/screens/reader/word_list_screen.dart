@@ -151,7 +151,7 @@ class _WordListRowTile extends StatefulWidget {
 }
 
 class _WordListRowTileState extends State<_WordListRowTile> {
-  static final _pronunciation = PronunciationService();
+  static const _pronunciation = PronunciationService();
   bool _speaking = false;
 
   Future<void> _toggleSpeak() async {
