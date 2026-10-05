@@ -84,6 +84,17 @@ class AlphabetQuizEngine {
   int get teachIndex => _teachIndex;
   int get teachTotal => currentGroup.length;
   bool get isLastTeachLetterInGroup => _teachIndex == currentGroup.length - 1;
+  bool get isFirstTeachLetterInGroup => _teachIndex == 0;
+
+  /// Moves back to the previous letter in this group's teach phase.
+  /// No-op on the first letter of a group — there's nothing before it
+  /// to go back to (and no way to go back a group, same as the rest of
+  /// this flow: groups are only ever moved forward).
+  void retreatTeach() {
+    if (_teachIndex > 0) {
+      _teachIndex--;
+    }
+  }
 
   /// Moves to the next letter in this group's teach phase, or — once
   /// every letter in the group has been shown — starts this group's

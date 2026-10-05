@@ -313,6 +313,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 class _HomeStreakBanner extends StatelessWidget {
   const _HomeStreakBanner();
 
+  void _explainStreak(BuildContext context, AppColors colors, int streak) {
+    final message = streak == 0
+        ? "This is your streak flame — it's a good thing! It lights up "
+            'each day you study and grows brighter the longer you keep '
+            'it going (orange → red → violet at 30+ days). It just '
+            "hasn't lit up yet because you haven't started a streak."
+        : "This is your streak — it's a good thing, not a warning! It "
+            'just glows warmer the longer your streak runs. If it looks '
+            "red right now, that's only because you haven't studied yet "
+            "today — finish one quiz and it settles back down.";
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: colors.surface,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
   Color _flameColor(AppColors colors, int streak) {
     if (streak >= 30) return const Color(0xFF7B61FF); // "on fire" violet
     if (streak >= 7) return const Color(0xFFFF5A36);  // deep orange-red
@@ -362,16 +382,23 @@ class _HomeStreakBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.9, end: 1.0),
-            duration: const Duration(milliseconds: 400),
-            curve: Curves.elasticOut,
-            builder: (context, scale, child) =>
-                Transform.scale(scale: scale, child: child),
-            child: Icon(
-              Icons.local_fire_department_rounded,
-              color: flameColor,
-              size: 34,
+          // UX fix: the flame read as alarming rather than encouraging
+          // ("why is this a flame? seems like a bad thing"), especially
+          // in its red at-risk coloring. A tap explains what it means
+          // instead of leaving it to look like a warning icon.
+          GestureDetector(
+            onTap: () => _explainStreak(context, colors, streak),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.9, end: 1.0),
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.elasticOut,
+              builder: (context, scale, child) =>
+                  Transform.scale(scale: scale, child: child),
+              child: Icon(
+                Icons.local_fire_department_rounded,
+                color: flameColor,
+                size: 34,
+              ),
             ),
           ),
           const SizedBox(width: 14),

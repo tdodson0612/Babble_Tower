@@ -94,9 +94,20 @@ class _UnscrambleViewState extends State<_UnscrambleView> {
   }
 
   void _checkAnswer() {
-    _locked = true;
+    // Bug fix: this used to set `_locked = true` immediately, which
+    // disabled "tap the answer zone to undo" the instant the last tile
+    // landed — even if it was the wrong letter. That left a 500ms
+    // window where the answer zone visibly says "Tap the answer to
+    // undo" but tapping it does nothing, which is exactly the "undo
+    // doesn't work" behavior reported. Tile taps are already safe
+    // without the lock (every tile is used once all are placed, so
+    // there's nothing left to tap), so we only lock once the result is
+    // actually being reported, preserving the undo window up to that
+    // point.
     final correct = _answer.join() == widget.target.word;
     Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      setState(() => _locked = true);
       widget.onAnswered(correct);
     });
     setState(() {});

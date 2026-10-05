@@ -1,9 +1,26 @@
 // lib/presentation/widgets/mystery_box_overlay.dart
 
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../data/services/rewards_service.dart';
+
+/// Guards against more than one mystery-box reveal being shown at once.
+/// Quiz screens fire this from a fire-and-forget `.then()` after an
+/// async reward roll, so with the ~6% per-answer odds it's possible for
+/// a second correct answer to resolve while the first reveal is still
+/// animating — stacking two `showGeneralDialog` routes on top of each
+/// other. The second dialog then sits on top of a first one whose
+/// AnimationController gets paused mid-flight (TickerMode turns off for
+/// a covered route), which is what produced the "frozen" popup showing
+/// only 2-3 colored circles with no visible way to continue: the user
+/// was looking at the SECOND dialog, and dismissing it (if they found
+/// its own button) would reveal a first dialog stuck between 50-60% of
+/// its animation, where the reveal text/button are still at opacity 0.
+/// The reward itself is never lost by skipping a reveal — RewardsService
+/// already persists it to SharedPreferences before this is ever called.
+bool _mysteryBoxShowing = false;
 
 /// Shows the mystery-box reveal as a modal overlay. Call this after
 /// RewardsService.rollForCorrectAnswer() returns a result where
@@ -12,19 +29,28 @@ Future<void> showMysteryBoxReveal(
   BuildContext context,
   RewardResult result,
   AppColors colors,
-) {
-  return showGeneralDialog(
-    context: context,
-    barrierDismissible: false,
-    barrierColor: Colors.black54,
-    transitionDuration: const Duration(milliseconds: 200),
-    pageBuilder: (_, __, ___) =>
-        _MysteryBoxContent(result: result, colors: colors),
-    transitionBuilder: (_, animation, __, child) => FadeTransition(
-      opacity: animation,
-      child: child,
-    ),
-  );
+) async {
+  // Skip rather than stack — see _mysteryBoxShowing doc above. The XP/
+  // theme unlock was already saved by RewardsService regardless.
+  if (_mysteryBoxShowing) return;
+  _mysteryBoxShowing = true;
+  try {
+    await showGeneralDialog(
+      context: context,
+      useRootNavigator: false,
+      barrierDismissible: false,
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (_, __, ___) =>
+          _MysteryBoxContent(result: result, colors: colors),
+      transitionBuilder: (_, animation, __, child) => FadeTransition(
+        opacity: animation,
+        child: child,
+      ),
+    );
+  } finally {
+    _mysteryBoxShowing = false;
+  }
 }
 
 class _MysteryBoxContent extends StatefulWidget {
@@ -43,6 +69,14 @@ class _MysteryBoxContentState extends State<_MysteryBoxContent>
   late final Animation<double> _shake;
   late final Animation<double> _pop;
   late final Animation<double> _revealOpacity;
+
+  /// Failsafe: if something ever prevents the user from dismissing this
+  /// normally (a future, un-reproduced variant of the stacking issue
+  /// described above, a layout issue hiding the "Nice!" button, etc.)
+  /// this guarantees the dialog never sits on screen forever. Started
+  /// once the reveal animation completes; cancelled on manual dismiss.
+  Timer? _autoDismissTimer;
+
   final List<_ConfettiSpec> _confetti = List.generate(
     12,
     (i) => _ConfettiSpec(
@@ -84,10 +118,28 @@ class _MysteryBoxContentState extends State<_MysteryBoxContent>
       parent: _controller,
       curve: const Interval(0.55, 0.85, curve: Curves.easeOut),
     );
+
+    _controller.addStatusListener(_onControllerStatus);
+  }
+
+  void _onControllerStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed) {
+      // Give the user a generous window to tap "Nice!" (or anywhere,
+      // once revealed) before auto-dismissing on their behalf.
+      _autoDismissTimer = Timer(const Duration(seconds: 6), () {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
+  }
+
+  void _dismiss() {
+    if (mounted) Navigator.of(context).maybePop();
   }
 
   @override
   void dispose() {
+    _autoDismissTimer?.cancel();
+    _controller.removeStatusListener(_onControllerStatus);
     _controller.dispose();
     super.dispose();
   }
@@ -148,7 +200,16 @@ class _MysteryBoxContentState extends State<_MysteryBoxContent>
                     const SizedBox(height: 16),
                     Opacity(
                       opacity: _revealOpacity.value,
-                      child: _buildRevealText(result, colors),
+                      child: GestureDetector(
+                        // Belt-and-suspenders: once revealed, tapping
+                        // anywhere in the text area dismisses too, not
+                        // just the "Nice!" button — in case the button
+                        // itself is ever missed (small hit area, font
+                        // scaling, etc.).
+                        onTap: _dismiss,
+                        behavior: HitTestBehavior.opaque,
+                        child: _buildRevealText(result, colors),
+                      ),
                     ),
                   ],
                 ],
@@ -229,7 +290,7 @@ class _MysteryBoxContentState extends State<_MysteryBoxContent>
         ),
         const SizedBox(height: 20),
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _dismiss,
           style: TextButton.styleFrom(
             backgroundColor: colors.primary,
             foregroundColor: Colors.white,

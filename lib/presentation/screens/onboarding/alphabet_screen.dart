@@ -67,6 +67,13 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
     });
   }
 
+  void _retreatTeach() {
+    setState(() {
+      _engine.retreatTeach();
+      _revealed = false;
+    });
+  }
+
   void _selectOption(int index) {
     if (_answerLocked) return;
     final correct = index == _engine.currentQuestion!.correctIndex;
@@ -340,22 +347,52 @@ class _AlphabetScreenState extends ConsumerState<AlphabetScreen> {
 
   Widget _buildTeachControls(AppColors colors) {
     final isLastInGroup = _engine.isLastTeachLetterInGroup;
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: _advanceTeach,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: colors.primary,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          elevation: 0,
+    final isFirstInGroup = _engine.isFirstTeachLetterInGroup;
+    return Row(
+      children: [
+        // Bug fix: there was previously no way to go back and review a
+        // letter already shown in this group — hidden rather than
+        // disabled on the first letter since there's nothing to go
+        // back to yet (and no cross-group back, same as the rest of
+        // this flow).
+        if (!isFirstInGroup) ...[
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _retreatTeach,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colors.primary,
+                side: BorderSide(color: colors.primary),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text(
+                '← Previous',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+        Expanded(
+          flex: isFirstInGroup ? 1 : 1,
+          child: ElevatedButton(
+            onPressed: _advanceTeach,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 0,
+            ),
+            child: Text(
+              isLastInGroup ? 'Start quiz →' : 'Next letter →',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+          ),
         ),
-        child: Text(
-          isLastInGroup ? 'Start quiz →' : 'Next letter →',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-      ),
+      ],
     );
   }
 

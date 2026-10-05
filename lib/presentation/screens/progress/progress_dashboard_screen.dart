@@ -12,6 +12,7 @@ import '../../../domain/entities/parsing_word.dart';
 import '../../../domain/entities/word_entry.dart';
 import '../../../domain/usecases/track_parsing_progress_usecase.dart';
 import '../../../domain/usecases/track_verse_progress_usecase.dart';
+import '../../providers/bible_provider.dart';
 import '../../providers/language_provider.dart';
 import '../../widgets/review_entry_point.dart';
 
@@ -540,55 +541,92 @@ class _RecentVerseTile extends StatelessWidget {
 
   const _RecentVerseTile({required this.verse, required this.colors});
 
+  /// verseKey format is "Book_chapter_verseNumber" (see
+  /// VerseProgressModel.buildKey) — book names never contain an
+  /// underscore, so this split is safe.
+  (String book, int chapter)? _parseBookChapter() {
+    final parts = verse.verseKey.split('_');
+    if (parts.length < 2) return null;
+    final chapter = int.tryParse(parts[1]);
+    if (chapter == null) return null;
+    return (parts[0], chapter);
+  }
+
+  Future<void> _openInReader(BuildContext context, WidgetRef ref) async {
+    final parsed = _parseBookChapter();
+    if (parsed == null) return;
+    final (book, chapter) = parsed;
+    await ref.read(bibleProvider.notifier).loadChapter(book, chapter);
+    if (context.mounted) Navigator.of(context).pushNamed('/reader');
+  }
+
   @override
   Widget build(BuildContext context) {
     final pct = (verse.lastAccuracy * 100).round();
     final passed = verse.completed;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            passed ? Icons.check_circle : Icons.radio_button_unchecked,
-            size: 18,
-            color: passed ? colors.primary : colors.border,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              // verseKey format is "Book_chapter_verse"
-              verse.verseKey.replaceAll('_', ' '),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: colors.textPrimary,
-              ),
+    // Bug fix: these rows used to just display status — the leading
+    // icon looked tappable ("radio buttons ... don't do anything") but
+    // nothing on the row responded to a tap. Wrapping the whole row in
+    // an InkWell that jumps back into that verse's chapter (same
+    // pattern Home's "Continue" resume card already uses: loadChapter
+    // then push '/reader') makes the row actually do something useful,
+    // and gives the icon a reason to look tappable.
+    return Consumer(
+      builder: (context, ref, _) => Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _openInReader(context, ref),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.border),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  passed ? Icons.check_circle : Icons.radio_button_unchecked,
+                  size: 18,
+                  color: passed ? colors.primary : colors.border,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    // verseKey format is "Book_chapter_verse"
+                    verse.verseKey.replaceAll('_', ' '),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                ),
+                Text(
+                  '$pct%',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: pct >= 80 ? colors.primary : colors.accent,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '×${verse.retryCount}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right, size: 18, color: colors.border),
+              ],
             ),
           ),
-          Text(
-            '$pct%',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: pct >= 80 ? colors.primary : colors.accent,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '×${verse.retryCount}',
-            style: TextStyle(
-              fontSize: 12,
-              color: colors.textSecondary,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
